@@ -36,11 +36,17 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var notes: [NoteMeta] = []
     @Published private(set) var customTemplates: [CustomTemplate] = []
     @Published private(set) var tagDefs: [TagDef] = []
+    private var codeCounters: [String: Int] = [:]
+
+    /// Apelat după fiecare schimbare locală salvată (sincronizarea se programează de aici).
+    var onLocalChange: (() -> Void)?
+    private var applyingRemote = false
 
     init() {
         let lib = LibraryFile.load()
         folders = lib.folders
         notes = lib.notes
+        codeCounters = lib.codeCounters ?? [:]
         var needsSave = false
         if let tags = lib.tags {
             tagDefs = tags
@@ -397,11 +403,123 @@ final class LibraryStore: ObservableObject {
     // MARK: Foldere
 
     @discardableResult
-    func createFolder(name: String, parent: UUID?, colorHex: String, icon: String) -> UUID {
-        let f = Folder(name: name.isEmpty ? "Folder nou" : name, parentID: parent, colorHex: colorHex, icon: icon)
+    func createFolder(name: String, parent: UUID?, colorHex: String, icon: String,
+                      access: ClaudeAccess? = nil, hideTitles: Bool? = nil) -> UUID {
+        var f = Folder(name: name.isEmpty ? "Folder nou" : name, parentID: parent, colorHex: colorHex, icon: icon)
+        // Folderele de pe primul nivel primesc nivelul implicit din Setări; subfolderele moștenesc
+        f.access = access ?? (parent == nil ? Self.defaultAccess : nil)
+        f.hideTitles = hideTitles
         folders.append(f)
         persist()
         return f.id
+    }
+
+    // MARK: Acces Claude
+
+    static let defaultAccessKey = "claude.defaultAccess"
+
+    /// Nivelul pentru folderele noi de pe primul nivel (implicit: Privat).
+    static var defaultAccess: ClaudeAccess {
+        ClaudeAccess(rawValue: UserDefaults.standard.string(forKey: defaultAccessKey) ?? "") ?? .privat
+    }
+
+    /// Nivelul efectiv: setarea folderului sau, dacă lipsește, a celui mai apropiat părinte.
+    /// „Note rapide” (fără folder) rămân mereu private.
+    func effectiveAccess(_ folderID: UUID?) -> ClaudeAccess {
+        var current = folder(folderID)
+        var depth = 0
+        while let f = current, depth < 20 {
+            if let a = f.access { return a }
+            current = folder(f.parentID)
+            depth += 1
+        }
+        return .privat
+    }
+
+    func effectiveHideTitles(_ folderID: UUID?) -> Bool {
+        var current = folder(folderID)
+        var depth = 0
+        while let f = current, depth < 20 {
+            if let h = f.hideTitles { return h }
+            current = folder(f.parentID)
+            depth += 1
+        }
+        return false
+    }
+
+    /// Folderul are setarea lui proprie (nu o moștenește).
+    func hasOwnAccess(_ folderID: UUID) -> Bool { folder(folderID)?.access != nil }
+
+    func setAccess(_ access: ClaudeAccess?, for folderID: UUID) {
+        guard var f = folder(folderID) else { return }
+        f.access = access
+        updateFolder(f)
+    }
+
+    // MARK: Coduri scurte (GIC-12)
+
+    /// Prefixul codului: inițialele folderului („Dezvoltare Website Ventures” → DWV) sau primele litere („GIC”).
+    private func codePrefix(for folderID: UUID?) -> String {
+        guard let name = folder(folderID)?.name else { return "N" }
+        let words = name.folding(options: .diacriticInsensitive, locale: .current)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        let raw: String
+        if words.count >= 2 {
+            raw = words.prefix(4).compactMap(\.first).map(String.init).joined()
+        } else {
+            raw = String((words.first ?? "N").prefix(4))
+        }
+        let prefix = raw.uppercased()
+        return prefix.isEmpty ? "N" : prefix
+    }
+
+    /// Codul notei; se atribuie o singură dată și nu se mai schimbă.
+    @discardableResult
+    func ensureCode(_ id: UUID) -> String {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return "N-0" }
+        if let code = notes[i].code { return code }
+        let prefix = codePrefix(for: notes[i].folderID)
+        let next = (codeCounters[prefix] ?? 0) + 1
+        codeCounters[prefix] = next
+        let code = "\(prefix)-\(next)"
+        notes[i].code = code
+        return code
+    }
+
+    // MARK: Schimbări venite din sincronizare
+
+    /// Aplică statusul / etichetele venite din repo, fără să declanșeze o nouă sincronizare.
+    func applyRemote(_ id: UUID, status: NoteStatus?, tagIDs: [UUID], summary: String, by author: String) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        notes[i].status = status
+        notes[i].tagIDs = tagIDs
+        notes[i].externalChange = summary
+        notes[i].externalChangeAt = Date()
+        notes[i].externalChangeBy = author
+        applyingRemote = true
+        persist()
+        applyingRemote = false
+    }
+
+    /// Salvează fără să programeze sincronizarea (ex. coduri atribuite în timpul sincronizării).
+    func persistQuietly() {
+        applyingRemote = true
+        persist()
+        applyingRemote = false
+    }
+
+    /// Găsește o etichetă după nume, ignorând majuscule, diacritice și emoji.
+    func tagID(named raw: String) -> UUID? {
+        let key = Self.normalize(raw)
+        return tagDefs.first { Self.normalize($0.name) == key }?.id
+    }
+
+    /// `nonisolated`: folosit și din BoardFormat (în afara MainActor).
+    nonisolated static func normalize(_ s: String) -> String {
+        s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init).joined()
     }
 
     func updateFolder(_ folder: Folder) {
@@ -461,7 +579,8 @@ final class LibraryStore: ObservableObject {
     // MARK: Persistență
 
     private func persist() {
-        LibraryFile.save(Library(folders: folders, notes: notes, tags: tagDefs))
+        LibraryFile.save(Library(folders: folders, notes: notes, tags: tagDefs, codeCounters: codeCounters))
+        if !applyingRemote { onLocalChange?() }
         WidgetCenter.shared.reloadAllTimelines()
     }
 

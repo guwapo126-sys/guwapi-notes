@@ -23,6 +23,7 @@ struct RootView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Brand.background)
+            .refreshable { await SyncEngine.shared.syncNow() }
             .navigationTitle("guwapi notes")
             .searchable(text: $search, prompt: "Caută în toate notele")
             .toolbar { toolbarContent }
@@ -145,6 +146,7 @@ struct RootView: View {
         Button {
             folderDraft = FolderDraft(folder: Folder(name: "", parentID: folder.id, colorHex: folder.colorHex), isNew: true)
         } label: { Label("Subfolder nou", systemImage: "folder.badge.plus") }
+        AccessMenu(folder: folder)
         Button(role: .destructive) { deleting = folder } label: { Label("Șterge", systemImage: "trash") }
     }
 
@@ -184,6 +186,7 @@ struct FolderRow: View {
                 }
             }
             Spacer()
+            AccessBadge(folderID: folder.id)
             Text("\(store.noteCount(in: folder.id))").font(.caption).foregroundStyle(Brand.muted)
         }
     }
@@ -239,6 +242,7 @@ struct FolderScreen: View {
 
     private var screen: some View {
         ScrollView { content.padding(16) }
+            .refreshable { await SyncEngine.shared.syncNow() }
             .background(Brand.background)
             .navigationTitle(screenTitle)
             .toolbar { toolbarContent }
@@ -360,6 +364,7 @@ struct SubfolderList: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button { onEdit(sub) } label: { Label("Editează", systemImage: "pencil") }
+            AccessMenu(folder: sub)
         }
         .dropDestination(for: String.self) { items, _ in
             dropNote(items, into: sub.id)
@@ -575,6 +580,9 @@ struct NoteCard: View {
 
     private var bottomRow: some View {
         HStack(spacing: 6) {
+            if note.recentExternalChange {
+                Image(systemName: "sparkles").foregroundStyle(Brand.accent)
+            }
             Text(note.updated, format: .relative(presentation: .named))
             Spacer(minLength: 0)
             TagEmojis(note: note, limit: 3)
@@ -624,6 +632,7 @@ struct NoteListRow: View {
                 if !note.preview.isEmpty {
                     Text(note.preview).font(.subheadline).foregroundStyle(Brand.muted).lineLimit(1)
                 }
+                ExternalChangeLine(note: note)
                 if showPath {
                     Text(store.path(of: note.folderID)).font(.caption2).foregroundStyle(Brand.muted.opacity(0.8))
                 }
@@ -658,6 +667,7 @@ struct FolderEditorSheet: View {
     @EnvironmentObject var store: LibraryStore
     @Environment(\.dismiss) var dismiss
     @State var folder: Folder
+    @State var accessChoice: AccessChoice
     private let isNew: Bool
 
     static let icons = [
@@ -669,6 +679,13 @@ struct FolderEditorSheet: View {
     init(draft: FolderDraft) {
         _folder = State(initialValue: draft.folder)
         isNew = draft.isNew
+        // Folder nou pe primul nivel: pornește de la nivelul implicit din Setări
+        let initial: ClaudeAccess? = draft.isNew && draft.folder.parentID == nil
+            ? LibraryStore.defaultAccess
+            : draft.folder.access
+        // Folder vechi de pe primul nivel (fără setare): „Moștenește” nu e o opțiune acolo → Privat
+        let shown: ClaudeAccess? = initial ?? (draft.folder.parentID == nil ? .privat : nil)
+        _accessChoice = State(initialValue: AccessChoice(shown))
     }
 
     private static let columns = Array(repeating: GridItem(.flexible()), count: 6)
@@ -680,6 +697,7 @@ struct FolderEditorSheet: View {
         NavigationStack {
             Form {
                 nameSection
+                AccessSection(folder: $folder, choice: $accessChoice)
                 colorSection
                 iconSection
             }
@@ -760,10 +778,13 @@ struct FolderEditorSheet: View {
     private func save() {
         let name = folder.name.trimmingCharacters(in: .whitespaces)
         if isNew {
-            store.createFolder(name: name, parent: folder.parentID, colorHex: folder.colorHex, icon: folder.icon)
+            store.createFolder(name: name, parent: folder.parentID, colorHex: folder.colorHex, icon: folder.icon,
+                               access: accessChoice.access ?? (folder.parentID == nil ? .privat : nil),
+                               hideTitles: folder.hideTitles)
         } else {
             var f = folder
             f.name = name.isEmpty ? "Folder" : name
+            f.access = accessChoice.access
             store.updateFolder(f)
         }
         dismiss()
@@ -1721,6 +1742,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                SyncSettingsSection()
                 Section {
                     appearancePicker
                 } header: {

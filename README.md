@@ -112,3 +112,11 @@ Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
 - Mod luminos / întunecat: Setări (⚙︎) → Aspect: Sistem (urmează iPhone-ul), Luminos, Întunecat.
 - Culorile alese (note, foldere, etichete, text colorat) au variantă lizibilă pe fundal deschis; textul normal din note se adaptează automat.
 - Build de rezervă pe Codemagic (codemagic.yaml); GitHub Actions rulează pe macos-latest.
+
+## Versiunea 0.8 — sincronizare cu Claude
+
+- Setări → Claude: pornește sincronizarea, repo (`proprietar/repo`), token GitHub (salvat în Keychain).
+- Acces Claude pe fiecare folder: 🔒 Privat (implicit) / 🏷️ Status; subfolderele moștenesc. Opțional „Ascunde titlurile”: în repo apar doar coduri (GIC-12) și foldere anonime.
+- În repo ajung doar titlul, statusul și etichetele (`proiecte/<Client>/<Proiect>/<COD>.md`). Conținutul rămâne pe telefon.
+- Schimbările făcute de Claude în repo apar în aplicație cu ✨ „Claude · În lucru → De verificat”.
+- Sincronizare: la deschiderea aplicației, la tragere în jos și la câteva secunde după o schimbare.

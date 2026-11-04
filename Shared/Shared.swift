@@ -232,6 +232,10 @@ struct Folder: Codable, Identifiable, Hashable {
     var created = Date()
     /// Modul de sortare al notelor din folder (vezi SortMode în aplicație).
     var sortMode: String? = nil
+    /// Ce poate vedea Claude în acest folder. nil = moștenește de la folderul părinte.
+    var access: ClaudeAccess? = nil
+    /// La nivelul „Status”: Claude vede coduri (GIC-12) în loc de titluri. nil = moștenește.
+    var hideTitles: Bool? = nil
 
     init(name: String = "Folder nou", parentID: UUID? = nil, colorHex: String = "59E0EF", icon: String = "folder.fill") {
         self.name = name
@@ -249,6 +253,36 @@ struct Folder: Codable, Identifiable, Hashable {
         icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "folder.fill"
         created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
         sortMode = try c.decodeIfPresent(String.self, forKey: .sortMode)
+        access = try? c.decodeIfPresent(ClaudeAccess.self, forKey: .access)
+        hideTitles = try c.decodeIfPresent(Bool.self, forKey: .hideTitles)
+    }
+}
+
+/// Nivelul de acces al lui Claude la un folder.
+enum ClaudeAccess: String, Codable, CaseIterable, Identifiable {
+    case privat = "private"
+    case status
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .privat: return "Privat"
+        case .status: return "Status"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .privat: return "lock.fill"
+        case .status: return "tag.fill"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .privat: return "Nimic nu pleacă de pe telefon."
+        case .status: return "Claude vede titlul, statusul și etichetele. Conținutul rămâne pe telefon."
+        }
     }
 }
 
@@ -269,6 +303,12 @@ struct NoteMeta: Codable, Identifiable, Hashable {
     var tagIDs: [UUID] = []
     /// Poziția în ordinea manuală a folderului.
     var sortIndex: Double? = nil
+    /// Cod scurt și stabil (ex. GIC-12), folosit în sincronizare.
+    var code: String? = nil
+    /// Ultima schimbare venită din afară (Claude / calculator), ex. „În lucru → De verificat”.
+    var externalChange: String? = nil
+    var externalChangeAt: Date? = nil
+    var externalChangeBy: String? = nil
 
     init(folderID: UUID? = nil) {
         self.folderID = folderID
@@ -290,6 +330,16 @@ struct NoteMeta: Codable, Identifiable, Hashable {
         status = try? c.decodeIfPresent(NoteStatus.self, forKey: .status)
         tagIDs = try c.decodeIfPresent([UUID].self, forKey: .tagIDs) ?? []
         sortIndex = try c.decodeIfPresent(Double.self, forKey: .sortIndex)
+        code = try c.decodeIfPresent(String.self, forKey: .code)
+        externalChange = try c.decodeIfPresent(String.self, forKey: .externalChange)
+        externalChangeAt = try c.decodeIfPresent(Date.self, forKey: .externalChangeAt)
+        externalChangeBy = try c.decodeIfPresent(String.self, forKey: .externalChangeBy)
+    }
+
+    /// Schimbare externă recentă (ultimele 3 zile), pentru insigna de pe rând / card.
+    var recentExternalChange: Bool {
+        guard let at = externalChangeAt else { return false }
+        return Date().timeIntervalSince(at) < 3 * 24 * 3600
     }
 
     var displayTitle: String { title.isEmpty ? "Fără titlu" : title }
@@ -299,11 +349,14 @@ struct Library: Codable {
     var folders: [Folder] = []
     var notes: [NoteMeta] = []
     var tags: [TagDef]? = nil
+    /// Ultimul număr folosit pentru fiecare prefix de cod (GIC → 34).
+    var codeCounters: [String: Int]? = nil
 
-    init(folders: [Folder] = [], notes: [NoteMeta] = [], tags: [TagDef]? = nil) {
+    init(folders: [Folder] = [], notes: [NoteMeta] = [], tags: [TagDef]? = nil, codeCounters: [String: Int]? = nil) {
         self.folders = folders
         self.notes = notes
         self.tags = tags
+        self.codeCounters = codeCounters
     }
 
     init(from decoder: Decoder) throws {
@@ -311,6 +364,7 @@ struct Library: Codable {
         folders = try c.decodeIfPresent([Folder].self, forKey: .folders) ?? []
         notes = try c.decodeIfPresent([NoteMeta].self, forKey: .notes) ?? []
         tags = try c.decodeIfPresent([TagDef].self, forKey: .tags)
+        codeCounters = try c.decodeIfPresent([String: Int].self, forKey: .codeCounters)
     }
 }
 

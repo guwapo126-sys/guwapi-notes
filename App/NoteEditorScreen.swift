@@ -94,11 +94,15 @@ struct NoteEditorScreen: View {
     }
 
     private func editorStack(_ text: NSAttributedString) -> some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 4) {
+            if let meta {
+                ClaudeVisibilityBar(note: meta)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+            }
             if let meta, !meta.tagIDs.isEmpty {
                 TagChips(note: meta)
                     .padding(.horizontal, 16)
-                    .padding(.top, 6)
             }
             RichTextView(initial: text, controller: controller, focusOnAppear: focusOnOpen)
         }

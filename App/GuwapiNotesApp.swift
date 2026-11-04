@@ -6,6 +6,8 @@ struct GuwapiNotesApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject var store = LibraryStore()
     @StateObject var router = Router.shared
+    @StateObject var sync = SyncEngine.shared
+    @Environment(\.scenePhase) var scenePhase
     @State var showSplash = true
     @AppStorage(AppearanceMode.storageKey) var appearance = AppearanceMode.system.rawValue
 
@@ -19,12 +21,18 @@ struct GuwapiNotesApp: App {
             }
             .environmentObject(store)
             .environmentObject(router)
+            .environmentObject(sync)
             .preferredColorScheme(AppearanceMode(rawValue: appearance)?.scheme)
             .tint(Brand.accent)
             .onOpenURL { router.handle($0) }
             .task {
+                sync.attach(store)
+                sync.syncIfStale()
                 try? await Task.sleep(nanoseconds: 650_000_000)
                 withAnimation(.easeOut(duration: 0.35)) { showSplash = false }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { sync.syncIfStale() }
             }
         }
     }
