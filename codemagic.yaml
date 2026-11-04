@@ -1,0 +1,41 @@
+# Build de rezervă pe Codemagic (Mac M2), aceiași pași ca .github/workflows/build.yml.
+# Pornește doar manual din codemagic.io, ca să nu consume minute la fiecare push.
+workflows:
+  ios-unsigned:
+    name: Build IPA (fără semnătură)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Unelte
+        script: brew install xcodegen ldid
+
+      - name: Generează proiectul Xcode
+        script: xcodegen generate
+
+      - name: Compilează (fără semnătură)
+        script: |
+          xcodebuild \
+            -project GuwapiNotes.xcodeproj \
+            -target GuwapiNotes \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$CM_BUILD_DIR/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Atașează entitlements și împachetează .ipa
+        script: |
+          APP="build/Release-iphoneos/GuwapiNotes.app"
+          test -d "$APP/PlugIns/GuwapiWidget.appex" || { echo "Widgetul nu a fost inclus"; exit 1; }
+          ldid -SWidget/GuwapiWidget.entitlements "$APP/PlugIns/GuwapiWidget.appex/GuwapiWidget"
+          ldid -SApp/GuwapiNotes.entitlements "$APP/GuwapiNotes"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry GuwapiNotes.ipa Payload
+          ls -lh GuwapiNotes.ipa
+    artifacts:
+      - GuwapiNotes.ipa
