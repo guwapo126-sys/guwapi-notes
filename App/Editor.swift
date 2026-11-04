@@ -409,6 +409,239 @@ final class EditorController: ObservableObject {
         tv.captureTextFromCamera(nil)
     }
 
+    /// Inserează textul scanat, cu titluri și liste.
+    func insertBlocks(_ all: [OCRBlock], unclear mode: UnclearMode = .image) {
+        let blocks = mode == .skip ? all.filter { $0.kind != .unclear } : all
+        guard let tv = textView, let storage, !blocks.isEmpty else { return }
+        let design = RT.design(of: tv.typingAttributes)
+        let warn = UIColor(hexString: "FF9F43")
+        let out = NSMutableAttributedString()
+        for (i, b) in blocks.enumerated() {
+            if i > 0 { out.append(NSAttributedString(string: "\n", attributes: RT.attributes(.body, design: design))) }
+            switch b.kind {
+            case .unclear:
+                var a = RT.attributes(.body, design: design)
+                a[.foregroundColor] = warn
+                a[.guwColor] = "FF9F43"
+                if mode == .image, let img = b.image {
+                    let width = tv.bounds.width - tv.textContainerInset.left - tv.textContainerInset.right
+                        - tv.textContainer.lineFragmentPadding * 2 - 4
+                    let maxW = min(max(120, width), img.size.width * 70 / max(img.size.height, 1))
+                    let attachment = RT.imageAttachment(img, maxWidth: maxW)
+                    out.append(NSAttributedString(string: "⚠ ", attributes: a))
+                    let pic = NSMutableAttributedString(attachment: attachment)
+                    pic.addAttributes(RT.attributes(.body, design: design), range: NSRange(location: 0, length: pic.length))
+                    out.append(pic)
+                } else {
+                    a[.backgroundColor] = warn.withAlphaComponent(0.25)
+                    out.append(NSAttributedString(string: "⚠ " + (b.text.isEmpty ? "necitit" : b.text), attributes: a))
+                }
+            case .heading:
+                out.append(NSAttributedString(string: b.text, attributes: RT.attributes(.h2, design: design)))
+            case .bullet:
+                var a = RT.attributes(.body, design: design)
+                a[.paragraphStyle] = RT.paragraphStyle(.body, list: true)
+                out.append(NSAttributedString(string: "• " + b.text, attributes: a))
+            case .paragraph, .line:
+                out.append(NSAttributedString(string: b.text, attributes: RT.attributes(.body, design: design)))
+            }
+        }
+        let r = tv.selectedRange
+        let ns = storage.string as NSString
+        let atLineStart = r.location == 0 || ns.character(at: r.location - 1) == 10
+        if !atLineStart {
+            out.insert(NSAttributedString(string: "\n", attributes: RT.attributes(.body, design: design)), at: 0)
+        }
+        out.append(NSAttributedString(string: "\n", attributes: RT.attributes(.body, design: design)))
+        storage.replaceCharacters(in: r, with: out)
+        tv.selectedRange = NSRange(location: r.location + out.length, length: 0)
+        tv.typingAttributes = RT.attributes(.body, design: design)
+        changed()
+    }
+
+    // MARK: Layout
+
+    /// Paragrafele atinse de selecție (sau paragraful curent).
+    private func selectedParagraphs() -> NSRange? {
+        guard let tv = textView, let storage else { return nil }
+        return (storage.string as NSString).paragraphRange(for: tv.selectedRange)
+    }
+
+    private func updateParagraphStyles(_ transform: (NSMutableParagraphStyle) -> Void) {
+        guard let tv = textView, let storage, let range = selectedParagraphs() else { return }
+        let selection = tv.selectedRange
+        if range.length == 0 {
+            let current = (tv.typingAttributes[.paragraphStyle] as? NSParagraphStyle) ?? NSParagraphStyle.default
+            let p = (current.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+            transform(p)
+            tv.typingAttributes[.paragraphStyle] = p
+            return
+        }
+        var runs: [(NSRange, NSParagraphStyle?)] = []
+        storage.enumerateAttribute(.paragraphStyle, in: range) { value, r, _ in
+            runs.append((r, value as? NSParagraphStyle))
+        }
+        storage.beginEditing()
+        for (r, style) in runs {
+            let p = (style?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+            transform(p)
+            storage.addAttribute(.paragraphStyle, value: p, range: r)
+        }
+        storage.endEditing()
+        tv.selectedRange = selection
+        if let current = tv.typingAttributes[.paragraphStyle] as? NSParagraphStyle,
+           let p = current.mutableCopy() as? NSMutableParagraphStyle {
+            transform(p)
+            tv.typingAttributes[.paragraphStyle] = p
+        }
+        changed()
+    }
+
+    func align(_ alignment: NSTextAlignment) {
+        updateParagraphStyles { $0.alignment = alignment }
+    }
+
+    func indent(_ delta: CGFloat) {
+        updateParagraphStyles { p in
+            p.firstLineHeadIndent = max(0, p.firstLineHeadIndent + delta)
+            p.headIndent = max(0, p.headIndent + delta)
+        }
+    }
+
+    /// Unește rândurile selectate într-un singur paragraf (sau paragraful curent cu următorul).
+    func joinLines() {
+        guard let tv = textView, let storage else { return }
+        let ns = storage.string as NSString
+        var range = tv.selectedRange
+        if range.length == 0 {
+            let current = ns.paragraphRange(for: range)
+            let end = current.location + current.length
+            guard end < ns.length else { return }
+            let next = ns.paragraphRange(for: NSRange(location: end, length: 0))
+            range = NSRange(location: current.location, length: current.length + next.length)
+        }
+        // Nu atingem linia nouă de la finalul intervalului
+        var last = range.location + range.length
+        while last > range.location, ns.character(at: last - 1) == 10 { last -= 1 }
+        var newlines: [Int] = []
+        for i in range.location..<last where ns.character(at: i) == 10 { newlines.append(i) }
+        guard !newlines.isEmpty else { return }
+
+        storage.beginEditing()
+        for i in newlines.reversed() {
+            let current = storage.string as NSString
+            let prevIsHyphen = i > 0 && current.character(at: i - 1) == 45
+            let nextIsLower: Bool = {
+                guard i + 1 < current.length else { return false }
+                let c = current.substring(with: NSRange(location: i + 1, length: 1))
+                return c.lowercased() == c && c.uppercased() != c
+            }()
+            if prevIsHyphen && nextIsLower {
+                storage.replaceCharacters(in: NSRange(location: i - 1, length: 2), with: "")
+            } else {
+                // elimină spațiile din jurul rândului nou, lasă unul singur
+                var start = i
+                var end = i + 1
+                while start > 0, current.character(at: start - 1) == 32 { start -= 1 }
+                while end < current.length, current.character(at: end) == 32 { end += 1 }
+                storage.replaceCharacters(in: NSRange(location: start, length: end - start), with: " ")
+            }
+        }
+        storage.endEditing()
+        tv.selectedRange = NSRange(location: range.location, length: 0)
+        changed()
+    }
+
+    /// Curăță textul: rânduri goale multiple, spații duble, spații la final de rând.
+    func cleanUp() {
+        guard let tv = textView, let storage else { return }
+        let selection = tv.selectedRange
+        let target = selection.length > 0 ? selection : NSRange(location: 0, length: storage.length)
+        let rules: [(String, String)] = [
+            (#"[ \t]+\n"#, "\n"),        // spații la final de rând
+            (#"\n{3,}"#, "\n\n"),         // cel mult un rând gol
+            (#"(?<=\S) {2,}"#, " ")       // spații duble în text
+        ]
+        storage.beginEditing()
+        for (pattern, replacement) in rules {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let currentLength = target.location + target.length <= storage.length
+                ? target.length : max(0, storage.length - target.location)
+            let scope = NSRange(location: target.location, length: currentLength)
+            for m in regex.matches(in: storage.string, range: scope).reversed() {
+                storage.replaceCharacters(in: m.range, with: replacement)
+            }
+        }
+        storage.endEditing()
+        tv.selectedRange = NSRange(location: min(selection.location, storage.length), length: 0)
+        changed()
+    }
+
+    /// Schimbă locul a două paragrafe vecine; întoarce lungimea primei bucăți rezultate.
+    @discardableResult
+    private func swapParagraphs(_ first: NSRange, _ second: NSRange) -> Int {
+        guard let storage else { return 0 }
+        let a = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: first))
+        let b = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: second))
+        if !b.string.hasSuffix("\n"), a.string.hasSuffix("\n") {
+            let nl = a.attributedSubstring(from: NSRange(location: a.length - 1, length: 1))
+            a.deleteCharacters(in: NSRange(location: a.length - 1, length: 1))
+            b.append(nl)
+        }
+        let combined = NSMutableAttributedString(attributedString: b)
+        combined.append(a)
+        storage.replaceCharacters(in: NSRange(location: first.location, length: first.length + second.length), with: combined)
+        return b.length
+    }
+
+    func moveParagraph(up: Bool) {
+        guard let tv = textView, let storage else { return }
+        let ns = storage.string as NSString
+        let selection = tv.selectedRange
+        let current = ns.paragraphRange(for: NSRange(location: selection.location, length: 0))
+        let offset = selection.location - current.location
+        storage.beginEditing()
+        if up {
+            guard current.location > 0 else { storage.endEditing(); return }
+            let previous = ns.paragraphRange(for: NSRange(location: current.location - 1, length: 0))
+            swapParagraphs(previous, current)
+            storage.endEditing()
+            tv.selectedRange = NSRange(location: previous.location + offset, length: 0)
+        } else {
+            let end = current.location + current.length
+            guard end < ns.length, ns.substring(with: current).hasSuffix("\n") else { storage.endEditing(); return }
+            let next = ns.paragraphRange(for: NSRange(location: end, length: 0))
+            let movedLength = swapParagraphs(current, next)
+            storage.endEditing()
+            tv.selectedRange = NSRange(location: min(storage.length, current.location + movedLength + offset), length: 0)
+        }
+        changed()
+    }
+
+    func insertSeparator() {
+        guard let tv = textView, let storage else { return }
+        let p = NSMutableParagraphStyle()
+        p.alignment = .center
+        p.paragraphSpacing = 6
+        p.paragraphSpacingBefore = 6
+        var line = RT.attributes(.body)
+        line[.foregroundColor] = RT.mutedText
+        line[.paragraphStyle] = p
+        let body = RT.attributes(.body, design: RT.design(of: tv.typingAttributes))
+        let r = tv.selectedRange
+        let ns = storage.string as NSString
+        let out = NSMutableAttributedString()
+        if r.location > 0 && ns.character(at: r.location - 1) != 10 {
+            out.append(NSAttributedString(string: "\n", attributes: body))
+        }
+        out.append(NSAttributedString(string: String(repeating: "─", count: 18), attributes: line))
+        out.append(NSAttributedString(string: "\n", attributes: body))
+        storage.replaceCharacters(in: r, with: out)
+        tv.selectedRange = NSRange(location: r.location + out.length, length: 0)
+        tv.typingAttributes = body
+        changed()
+    }
+
     func dismissKeyboard() { textView?.resignFirstResponder() }
 }
 
@@ -578,6 +811,26 @@ struct FormatBar: View {
                     }
                 } label: { barIcon("textformat.size") }
 
+                Menu {
+                    Section("Paragraf") {
+                        Button { controller.joinLines() } label: { Label("Unește rândurile", systemImage: "arrow.right.to.line") }
+                        Button { controller.cleanUp() } label: { Label("Curăță textul", systemImage: "wand.and.stars") }
+                        Button { controller.moveParagraph(up: true) } label: { Label("Mută paragraful sus", systemImage: "arrow.up") }
+                        Button { controller.moveParagraph(up: false) } label: { Label("Mută paragraful jos", systemImage: "arrow.down") }
+                    }
+                    Section("Aliniere") {
+                        Button { controller.align(.left) } label: { Label("Stânga", systemImage: "text.alignleft") }
+                        Button { controller.align(.center) } label: { Label("Centru", systemImage: "text.aligncenter") }
+                        Button { controller.align(.right) } label: { Label("Dreapta", systemImage: "text.alignright") }
+                        Button { controller.align(.justified) } label: { Label("Justificat", systemImage: "text.justify") }
+                    }
+                    Section("Indentare") {
+                        Button { controller.indent(24) } label: { Label("Mărește indentarea", systemImage: "increase.indent") }
+                        Button { controller.indent(-24) } label: { Label("Micșorează indentarea", systemImage: "decrease.indent") }
+                    }
+                    Button { controller.insertSeparator() } label: { Label("Separator", systemImage: "minus") }
+                } label: { barIcon("text.alignleft") }
+
                 divider
 
                 Menu {
@@ -662,11 +915,54 @@ struct DocumentScanner: UIViewControllerRepresentable {
     }
 }
 
+struct OCRBlock: Identifiable {
+    enum Kind { case heading, paragraph, bullet, line, unclear }
+    let id = UUID()
+    let kind: Kind
+    var text: String
+    /// Pentru rândurile nesigure: decupajul din poza originală.
+    var image: UIImage? = nil
+}
+
+/// Ce facem cu rândurile citite nesigur.
+enum UnclearMode: String, CaseIterable, Identifiable {
+    case image, marked, skip
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .image: return "Imaginea rândului"
+        case .marked: return "Text ghicit, marcat"
+        case .skip: return "Omite"
+        }
+    }
+}
+
 enum OCR {
-    /// Recunoaște textul de pe pagini; rulează în afara firului principal.
-    static func recognize(_ images: [UIImage]) async -> String {
+    struct Line {
+        let text: String
+        let box: CGRect   // coordonate normalizate Vision (origine jos-stânga)
+        var confidence: Float = 1
+        var crop: UIImage? = nil
+        var isUnclear: Bool { confidence < OCR.minimumConfidence }
+    }
+
+    /// Sub acest scor, rândul e considerat citit nesigur.
+    static let minimumConfidence: Float = 0.5
+
+    /// Decupează rândul din pagină, cu puțină margine.
+    static func crop(_ cg: CGImage, _ box: CGRect) -> UIImage? {
+        let w = CGFloat(cg.width), h = CGFloat(cg.height)
+        var rect = CGRect(x: box.minX * w, y: (1 - box.maxY) * h, width: box.width * w, height: box.height * h)
+        rect = rect.insetBy(dx: -rect.height * 0.3, dy: -rect.height * 0.35)
+            .intersection(CGRect(x: 0, y: 0, width: w, height: h))
+        guard !rect.isNull, rect.width > 4, rect.height > 4, let piece = cg.cropping(to: rect.integral) else { return nil }
+        return UIImage(cgImage: piece)
+    }
+
+    /// Recunoaște rândurile de pe fiecare pagină; rulează în afara firului principal.
+    static func recognizeLines(_ images: [UIImage]) async -> [[Line]] {
         await Task.detached(priority: .userInitiated) {
-            var pages: [String] = []
+            var pages: [[Line]] = []
             for image in images {
                 guard let cg = image.cgImage else { continue }
                 let request = VNRecognizeTextRequest()
@@ -675,10 +971,236 @@ enum OCR {
                 request.automaticallyDetectsLanguage = true
                 let handler = VNImageRequestHandler(cgImage: cg, orientation: .up)
                 try? handler.perform([request])
-                let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-                pages.append(lines.joined(separator: "\n"))
+                let lines: [Line] = (request.results ?? []).compactMap { obs in
+                    guard let best = obs.topCandidates(1).first else { return nil }
+                    var line = Line(text: best.string, box: obs.boundingBox)
+                    line.confidence = best.confidence
+                    if line.isUnclear { line.crop = OCR.crop(cg, obs.boundingBox) }
+                    return line
+                }
+                pages.append(lines)
             }
-            return pages.joined(separator: "\n\n")
+            return pages
         }.value
+    }
+
+    /// Transformă rândurile în blocuri. `smart` recompune paragrafele; altfel păstrează rândurile.
+    static func blocks(from pages: [[Line]], smart: Bool) -> [OCRBlock] {
+        var out: [OCRBlock] = []
+        for page in pages {
+            let lines = page.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+            if !smart {
+                out += lines.map {
+                    $0.isUnclear
+                        ? OCRBlock(kind: .unclear, text: $0.text, image: $0.crop)
+                        : OCRBlock(kind: .line, text: $0.text.trimmingCharacters(in: .whitespaces))
+                }
+                continue
+            }
+            let heights = lines.map { $0.box.height }.sorted()
+            let median = heights.isEmpty ? 0.02 : heights[heights.count / 2]
+            let maxWidth = lines.map { $0.box.width }.max() ?? 1
+
+            var current = ""
+            var previous: Line?
+            var lastBulletX: CGFloat?
+
+            func flush() {
+                if !current.isEmpty { out.append(OCRBlock(kind: .paragraph, text: current)) }
+                current = ""
+            }
+
+            for line in lines {
+                let t = line.text.trimmingCharacters(in: .whitespaces)
+                let gap = previous.map { $0.box.minY - line.box.maxY } ?? 0
+
+                // Rând citit nesigur: separat, cu imaginea originală
+                if line.isUnclear {
+                    flush()
+                    out.append(OCRBlock(kind: .unclear, text: t, image: line.crop))
+                    previous = line
+                    lastBulletX = nil
+                    continue
+                }
+                // Titlu: rând vizibil mai mare decât restul
+                if line.box.height > median * 1.35 && t.count < 80 {
+                    flush()
+                    out.append(OCRBlock(kind: .heading, text: t))
+                    previous = line
+                    lastBulletX = nil
+                    continue
+                }
+                // Element de listă
+                if let item = bulletContent(t) {
+                    flush()
+                    out.append(OCRBlock(kind: .bullet, text: item))
+                    previous = line
+                    lastBulletX = line.box.minX
+                    continue
+                }
+                // Continuarea unui element de listă (rând indentat, apropiat)
+                if let bx = lastBulletX, current.isEmpty, gap < median * 0.9,
+                   line.box.minX > bx + 0.01, let last = out.indices.last, out[last].kind == .bullet {
+                    out[last].text = join(out[last].text, t)
+                    previous = line
+                    continue
+                }
+                lastBulletX = nil
+
+                var newParagraph = current.isEmpty
+                if let p = previous, !current.isEmpty {
+                    if gap > median * 0.9 { newParagraph = true }
+                    let ended = p.text.hasSuffix(".") || p.text.hasSuffix(":") || p.text.hasSuffix("!") || p.text.hasSuffix("?")
+                    if ended && p.box.width < maxWidth * 0.7 { newParagraph = true }
+                    if line.box.minX > p.box.minX + 0.05 { newParagraph = true }   // primul rând indentat
+                }
+                if numbered(t) { newParagraph = true }
+
+                if newParagraph {
+                    flush()
+                    current = t
+                } else {
+                    current = join(current, t)
+                }
+                previous = line
+            }
+            flush()
+        }
+        return out
+    }
+
+    /// Lipește două bucăți de text, refăcând cuvintele despărțite cu cratimă.
+    static func join(_ a: String, _ b: String) -> String {
+        if a.hasSuffix("-"), let first = b.first, first.isLowercase {
+            return String(a.dropLast()) + b
+        }
+        return a + " " + b
+    }
+
+    static func bulletContent(_ t: String) -> String? {
+        for marker in ["• ", "- ", "* ", "◦ ", "– ", "· ", "▪ ", "○ ", "□ ", "☐ "] where t.hasPrefix(marker) {
+            return String(t.dropFirst(marker.count)).trimmingCharacters(in: .whitespaces)
+        }
+        return nil
+    }
+
+    static func numbered(_ t: String) -> Bool {
+        t.range(of: #"^\d{1,2}[.)] "#, options: .regularExpression) != nil
+    }
+}
+
+// MARK: - Previzualizare scanare
+
+struct ScanReviewSheet: View {
+    let pages: [UIImage]
+    let onInsert: ([OCRBlock], Bool, UnclearMode) -> Void
+    @Environment(\.dismiss) var dismiss
+    @State var lines: [[OCR.Line]]? = nil
+    @State var smart = true
+    @State var includeImages = false
+    @State var unclearMode: UnclearMode = .image
+
+    var blocks: [OCRBlock] { OCR.blocks(from: lines ?? [], smart: smart) }
+    var unclearCount: Int { (lines ?? []).joined().filter(\.isUnclear).count }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("Mod", selection: $smart) {
+                    Text("Paragrafe").tag(true)
+                    Text("Rânduri ca pe hârtie").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .padding(16)
+
+                if unclearCount > 0 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(unclearCount == 1 ? "1 rând nu a putut fi citit sigur"
+                                                : "\(unclearCount) rânduri nu au putut fi citite sigur",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color(hex: 0xFF9F43))
+                        Picker("Rânduri nesigure", selection: $unclearMode) {
+                            ForEach(UnclearMode.allCases) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xFF9F43, opacity: 0.12)))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                }
+
+                if lines == nil {
+                    Spacer()
+                    ProgressView("Extrag textul…")
+                    Spacer()
+                } else if blocks.isEmpty {
+                    Spacer()
+                    Text("Nu am găsit text pe pagină.").foregroundStyle(Brand.muted)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: smart ? 10 : 2) {
+                            ForEach(blocks) { b in
+                                switch b.kind {
+                                case .heading:
+                                    Text(b.text).font(.title3.bold()).foregroundStyle(Brand.text)
+                                case .bullet:
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text("•").foregroundStyle(Brand.accent)
+                                        Text(b.text).foregroundStyle(Brand.text)
+                                    }
+                                case .paragraph, .line:
+                                    Text(b.text).foregroundStyle(Brand.text)
+                                case .unclear:
+                                    if unclearMode != .skip {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            if unclearMode == .image, let img = b.image {
+                                                Image(uiImage: img)
+                                                    .resizable()
+                                                    .scaledToFit()
+                                                    .frame(maxHeight: 60, alignment: .leading)
+                                            }
+                                            Label(b.text.isEmpty ? "necitit" : b.text,
+                                                  systemImage: "exclamationmark.triangle.fill")
+                                                .font(.caption)
+                                                .foregroundStyle(Color(hex: 0xFF9F43))
+                                        }
+                                        .padding(6)
+                                        .background(RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color(hex: 0xFF9F43, opacity: 0.7), lineWidth: 1))
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Brand.surface))
+                        .padding(.horizontal, 16)
+                    }
+                }
+
+                Toggle("Adaugă și pozele paginilor", isOn: $includeImages)
+                    .padding(16)
+            }
+            .background(Brand.background)
+            .navigationTitle("Text scanat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Anulează") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Inserează") {
+                        onInsert(blocks, includeImages, unclearMode)
+                        dismiss()
+                    }
+                    .bold()
+                    .disabled(lines == nil)
+                }
+            }
+            .task {
+                if lines == nil { lines = await OCR.recognizeLines(pages) }
+            }
+        }
     }
 }

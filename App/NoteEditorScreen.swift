@@ -11,7 +11,7 @@ struct NoteEditorScreen: View {
     @State var focusOnOpen = false
     @State var photoItem: PhotosPickerItem?
     @State var scannedPages: [UIImage] = []
-    @State var showScanOptions = false
+    @State var showScanReview = false
     @State var showReminder = false
     @State var showMove = false
     @State var showTemplateName = false
@@ -83,7 +83,7 @@ struct NoteEditorScreen: View {
                     controller.showScanner = false
                     if !pages.isEmpty {
                         scannedPages = pages
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showScanOptions = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showScanReview = true }
                     }
                 }
                 .ignoresSafeArea()
@@ -94,11 +94,11 @@ struct NoteEditorScreen: View {
                 }
             }
         }
-        .confirmationDialog("Ce inserez din scanare?", isPresented: $showScanOptions, titleVisibility: .visible) {
-            Button("Doar textul") { insertScan(text: true, images: false) }
-            Button("Textul și pozele paginilor") { insertScan(text: true, images: true) }
-            Button("Doar pozele") { insertScan(text: false, images: true) }
-            Button("Renunță", role: .cancel) { scannedPages = [] }
+        .sheet(isPresented: $showScanReview, onDismiss: { scannedPages = [] }) {
+            ScanReviewSheet(pages: scannedPages) { blocks, includeImages, mode in
+                if includeImages { for p in scannedPages { controller.insertImage(p) } }
+                controller.insertBlocks(blocks, unclear: mode)
+            }
         }
         .sheet(isPresented: $showReminder) {
             if let meta { ReminderSheet(meta: meta) }
@@ -166,19 +166,6 @@ struct NoteEditorScreen: View {
             store.deleteNote(noteID)
         } else {
             controller.flush()
-        }
-    }
-
-    private func insertScan(text: Bool, images: Bool) {
-        let pages = scannedPages
-        scannedPages = []
-        if images { for p in pages { controller.insertImage(p) } }
-        guard text else { return }
-        isOCRRunning = true
-        Task {
-            let recognized = await OCR.recognize(pages)
-            isOCRRunning = false
-            controller.insertText(recognized.isEmpty ? "(nu am găsit text pe pagină)" : "\n" + recognized + "\n")
         }
     }
 
