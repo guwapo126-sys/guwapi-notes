@@ -11,7 +11,7 @@ enum SortMode: String, CaseIterable, Identifiable {
         case .manual: return "Ordinea mea"
         case .updated: return "Ultima modificare"
         case .title: return "Titlu"
-        case .status: return "Status"
+        case .status: return "Grupat pe status"
         }
     }
     var icon: String {
@@ -19,7 +19,7 @@ enum SortMode: String, CaseIterable, Identifiable {
         case .manual: return "hand.draw"
         case .updated: return "clock"
         case .title: return "textformat.abc"
-        case .status: return "flag"
+        case .status: return "square.stack.3d.up"
         }
     }
 }
@@ -59,9 +59,39 @@ final class LibraryStore: ObservableObject {
                 needsSave = true
             }
         }
+        if migrateTagsV07() { needsSave = true }
         loadTemplates()
         migrateLegacyIfNeeded()
         if needsSave { persist() }
+    }
+
+    /// 0.7: eticheta „În lucru” devine status; apar etichetele Bug și Securitate.
+    private func migrateTagsV07() -> Bool {
+        let key = "tags.migrated.v07"
+        guard !UserDefaults.standard.bool(forKey: key) else { return false }
+        UserDefaults.standard.set(true, forKey: key)
+        var changed = false
+
+        if let working = tagDefs.first(where: { $0.name == "În lucru" }) {
+            for i in notes.indices where notes[i].tagIDs.contains(working.id) {
+                notes[i].tagIDs.removeAll { $0 == working.id }
+                if notes[i].status == nil { notes[i].status = .progress }
+            }
+            tagDefs.removeAll { $0.id == working.id }
+            changed = true
+        }
+        let additions = [TagDef(name: "Bug", emoji: "🐛", colorHex: "A3E635"),
+                         TagDef(name: "Securitate", emoji: "🔒", colorHex: "59E0EF")]
+        for tag in additions where !tagDefs.contains(where: { $0.name == tag.name }) {
+            // Înaintea lui „Jale”, dacă există, ca lista să rămână ordonată
+            if let jale = tagDefs.firstIndex(where: { $0.name == "Jale" }) {
+                tagDefs.insert(tag, at: jale)
+            } else {
+                tagDefs.append(tag)
+            }
+            changed = true
+        }
+        return changed
     }
 
     // MARK: Interogări
@@ -86,7 +116,8 @@ final class LibraryStore: ObservableObject {
         let raw = folderID == nil
             ? UserDefaults.standard.string(forKey: "rootSortMode")
             : folder(folderID)?.sortMode
-        return SortMode(rawValue: raw ?? "") ?? .updated
+        // Implicit: grupat pe status — intri în proiect și vezi imediat ce a rămas
+        return SortMode(rawValue: raw ?? "") ?? .status
     }
 
     func setSortMode(_ mode: SortMode, for folderID: UUID?) {
@@ -99,10 +130,15 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    /// Salvează ordinea aleasă de utilizator și trece folderul pe „Ordinea mea”.
+    /// Salvează ordinea aleasă de utilizator. Folderul trece pe „Ordinea mea”,
+    /// cu excepția modului grupat pe status, unde ordinea se aplică în interiorul fiecărui grup.
     func setManualOrder(_ ids: [UUID], for folderID: UUID?) {
         for (i, id) in ids.enumerated() {
             if let idx = notes.firstIndex(where: { $0.id == id }) { notes[idx].sortIndex = Double(i) }
+        }
+        if sortMode(for: folderID) == .status {
+            persist()
+            return
         }
         if let folderID, var f = folder(folderID) {
             f.sortMode = SortMode.manual.rawValue
@@ -137,6 +173,11 @@ final class LibraryStore: ObservableObject {
         // Nota preia starea de „fixată” a zonei în care a fost lăsată
         if dragged.pinned != goal.pinned, let i = notes.firstIndex(where: { $0.id == id }) {
             notes[i].pinned = goal.pinned
+        }
+        // În modul grupat pe status, lăsată în alt grup, nota preia statusul grupului
+        if sortMode(for: dragged.folderID) == .status, dragged.status != goal.status,
+           let i = notes.firstIndex(where: { $0.id == id }) {
+            notes[i].status = goal.status
         }
         setManualOrder(order, for: dragged.folderID)
     }
@@ -246,17 +287,22 @@ final class LibraryStore: ObservableObject {
             case .title:
                 return a.displayTitle.localizedStandardCompare(b.displayTitle) == .orderedAscending
             case .status:
-                let ra = a.status?.rank ?? 2, rb = b.status?.rank ?? 2
+                let ra = a.status?.rank ?? NoteStatus.unsetRank, rb = b.status?.rank ?? NoteStatus.unsetRank
                 if ra != rb { return ra < rb }
-                return a.updated > b.updated
+                return manualOrder(a, b)
             case .manual:
-                switch (a.sortIndex, b.sortIndex) {
-                case let (x?, y?): return x == y ? a.created < b.created : x < y
-                case (.some, nil): return true
-                case (nil, .some): return false
-                case (nil, nil): return a.created < b.created
-                }
+                return manualOrder(a, b)
             }
+        }
+    }
+
+    /// Ordinea manuală (sortIndex); notele fără poziție vin după, în ordinea creării.
+    private static func manualOrder(_ a: NoteMeta, _ b: NoteMeta) -> Bool {
+        switch (a.sortIndex, b.sortIndex) {
+        case let (x?, y?): return x == y ? a.created < b.created : x < y
+        case (.some, nil): return true
+        case (nil, .some): return false
+        case (nil, nil): return a.created < b.created
         }
     }
 

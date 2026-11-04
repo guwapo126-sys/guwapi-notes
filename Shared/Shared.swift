@@ -39,48 +39,73 @@ extension Color {
 
 // MARK: - Model
 
-/// Statusul unei note: problemă deschisă, în lucru, gata.
+/// Statusul unei note: unde se află în fluxul de lucru. O notă are cel mult unul.
 enum NoteStatus: String, CaseIterable, Codable, Identifiable {
-    case problem, progress, done
+    // Ordinea de aici = ordinea din meniuri și filtre (fluxul de lucru)
+    case todo, progress, review, problem, done
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .problem: return "Problemă"
+        case .todo: return "De făcut"
         case .progress: return "În lucru"
+        case .review: return "De verificat"
+        case .problem: return "Problemă"
         case .done: return "Gata"
         }
     }
 
     var icon: String {
         switch self {
-        case .problem: return "exclamationmark.circle.fill"
+        case .todo: return "circle.dashed"
         case .progress: return "clock.fill"
+        case .review: return "eye.circle.fill"
+        case .problem: return "exclamationmark.circle.fill"
         case .done: return "checkmark.circle.fill"
         }
     }
 
     var hex: String {
         switch self {
-        case .problem: return "FF5A5F"
+        case .todo: return "9AA5B1"
         case .progress: return "FFD166"
+        case .review: return "8B7CFF"
+        case .problem: return "FF5A5F"
         case .done: return "3DDC97"
         }
     }
 
     var color: Color { Color(hexString: hex) }
 
-    /// Ordinea la sortarea după status: problemele primele.
+    /// Ordinea pe ecranul de proiect: ce cere atenție vine primul, ce e gata la final.
     var rank: Int {
         switch self {
         case .problem: return 0
         case .progress: return 1
-        case .done: return 3
+        case .review: return 2
+        case .todo: return 3
+        case .done: return 5
+        }
+    }
+
+    /// Rangul unei note fără status (între „De făcut” și „Gata”).
+    static let unsetRank = 4
+
+    /// Statusurile care încă înseamnă muncă rămasă.
+    var isOpen: Bool { self != .done }
+
+    /// Pasul următor la glisare / atingere rapidă.
+    var next: NoteStatus {
+        switch self {
+        case .todo: return .progress
+        case .progress: return .review
+        case .review: return .done
+        case .problem: return .progress
+        case .done: return .done
         }
     }
 }
 
-/// Etichetă definită de utilizator (tipul sau urgența notei). O notă poate avea mai multe.
 struct TagDef: Codable, Identifiable, Hashable {
     var id = UUID()
     var name: String
@@ -105,11 +130,12 @@ struct TagDef: Codable, Identifiable, Hashable {
 
     static var defaults: [TagDef] {
         [TagDef(name: "Urgent", emoji: "🔥", colorHex: "FF6B3D"),
-         TagDef(name: "Idee", emoji: "💡", colorHex: "8B7CFF"),
+         TagDef(name: "Decizie client", emoji: "🚨", colorHex: "FF5A5F"),
+         TagDef(name: "Idee", emoji: "💡", colorHex: "FFD166"),
          TagDef(name: "De discutat", emoji: "💬", colorHex: "4C8DFF"),
-         TagDef(name: "În lucru", emoji: "💪", colorHex: "FFD166"),
-         TagDef(name: "Jale", emoji: "💀", colorHex: "9AA5B1"),
-         TagDef(name: "Decizie client", emoji: "🚨", colorHex: "FF5A5F")]
+         TagDef(name: "Bug", emoji: "🐛", colorHex: "A3E635"),
+         TagDef(name: "Securitate", emoji: "🔒", colorHex: "59E0EF"),
+         TagDef(name: "Jale", emoji: "💀", colorHex: "9AA5B1")]
     }
 }
 

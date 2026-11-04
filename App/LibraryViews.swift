@@ -200,6 +200,7 @@ struct FolderScreen: View {
     @State var showReorder = false
     @State var statusFilter: NoteStatus?
     @State var tagFilter: UUID?
+    @State var showDone = false
 
     private var folder: Folder? { store.folder(folderID) }
 
@@ -256,7 +257,10 @@ struct FolderScreen: View {
                 SubfolderList(folders: subs) { folderDraft = FolderDraft(folder: $0, isNew: false) }
             }
             if !allNotes.isEmpty {
-                StatusFilterBar(notes: allNotes, selection: $statusFilter, tagSelection: $tagFilter)
+                ProjectSummary(notes: allNotes, selection: $statusFilter)
+            }
+            if allNotes.contains(where: { !$0.tagIDs.isEmpty }) {
+                StatusFilterBar(notes: allNotes, selection: $statusFilter, tagSelection: $tagFilter, showStatuses: false)
             }
             notesArea(notes, folderEmpty: allNotes.isEmpty && subs.isEmpty)
         }
@@ -267,6 +271,8 @@ struct FolderScreen: View {
             EmptyState(text: "Folder gol. Adaugă o notă sau un subfolder din butonul +.")
         } else if notes.isEmpty && filtersActive {
             EmptyState(text: "Nicio notă cu acest filtru.")
+        } else if store.sortMode(for: folderID) == .status && statusFilter == nil {
+            StatusGroupedNotes(notes: notes, grid: grid, showDone: $showDone)
         } else {
             NotesCollection(notes: notes, grid: grid, showPath: false)
         }
@@ -453,6 +459,7 @@ struct NotesCollection: View {
     private func gridCell(_ note: NoteMeta) -> some View {
         NavigationLink(value: Route.note(note.id)) { NoteCard(note: note, showPath: showPath) }
             .buttonStyle(.plain)
+            .overlay(alignment: .topLeading) { quickStatus(note).frame(width: 104, height: 30).padding(6) }
             .contextMenu { menu(note) }
             .modifier(drag(note, cornerRadius: 16))
     }
@@ -464,8 +471,15 @@ struct NotesCollection: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .leading) { quickStatus(note).frame(width: 40).frame(maxHeight: .infinity) }
         .contextMenu { menu(note) }
         .modifier(drag(note, cornerRadius: 10))
+    }
+
+    /// Atingi statusul (bulina sau eticheta de status) și îl schimbi direct, fără să deschizi nota.
+    private func quickStatus(_ note: NoteMeta) -> QuickStatusMenu {
+        let id = note.id
+        return QuickStatusMenu(current: note.status) { store.setStatus(id, $0) }
     }
 
     private func drag(_ note: NoteMeta, cornerRadius: CGFloat) -> NoteDrag {
@@ -618,6 +632,9 @@ struct NoteListRow: View {
                     .font(.caption2).foregroundStyle(Brand.muted)
                 if let r = note.reminder, r > Date() {
                     Image(systemName: "bell.fill").font(.caption2).foregroundStyle(Brand.accent)
+                }
+                if let s = note.status {
+                    Text(s.label).font(.caption2.weight(.semibold)).foregroundStyle(s.color)
                 }
             }
         }
@@ -1023,6 +1040,7 @@ struct StatusFilterBar: View {
     let notes: [NoteMeta]
     @Binding var selection: NoteStatus?
     @Binding var tagSelection: UUID?
+    var showStatuses = true
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -1031,7 +1049,9 @@ struct StatusFilterBar: View {
                     selection = nil
                     tagSelection = nil
                 }
-                ForEach(NoteStatus.allCases) { s in statusChip(s) }
+                if showStatuses {
+                    ForEach(NoteStatus.allCases) { s in statusChip(s) }
+                }
                 ForEach(store.tagDefs) { t in tagChip(t) }
             }
         }
@@ -1133,7 +1153,7 @@ struct ReorderSheet: View {
             Button("După titlu (1, 2, 3…)") { items.sort(by: Self.byTitle) }
             Button("După data creării") { items.sort { $0.created < $1.created } }
             Button("După status") {
-                items.sort { ($0.status?.rank ?? 2) < ($1.status?.rank ?? 2) }
+                items.sort { ($0.status?.rank ?? NoteStatus.unsetRank) < ($1.status?.rank ?? NoteStatus.unsetRank) }
             }
         } label: { Label("Pornește de la…", systemImage: "wand.and.stars") }
     }
@@ -1466,5 +1486,218 @@ struct RootSheets: ViewModifier {
 
     private var deletingBinding: Binding<Bool> {
         Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
+    }
+}
+
+
+// MARK: - Ecranul de proiect: rezumat, grupare pe status, schimbare rapidă
+
+/// Meniu invizibil peste bulina / eticheta de status a unei note.
+struct QuickStatusMenu: View {
+    let current: NoteStatus?
+    let onPick: (NoteStatus?) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(NoteStatus.allCases) { s in
+                Button { onPick(s) } label: { row(s) }
+            }
+            Divider()
+            Button { onPick(nil) } label: { Label("Fără status", systemImage: "circle.slash") }
+        } label: {
+            Color.clear.contentShape(Rectangle())
+        }
+        .accessibilityLabel("Schimbă statusul")
+    }
+
+    private func row(_ s: NoteStatus) -> some View {
+        Label {
+            Text(current == s ? "\(s.label) ✓" : s.label)
+        } icon: {
+            Image(uiImage: StatusMenu.icon(s))
+        }
+    }
+}
+
+/// Rezumatul de sus al unui proiect: câte au rămas, bara de progres, filtre pe status.
+struct ProjectSummary: View {
+    let notes: [NoteMeta]
+    @Binding var selection: NoteStatus?
+
+    /// Bara se citește de la stânga la dreapta: ce e gata, apoi ce mai e de făcut.
+    private static let barOrder: [NoteStatus] = [.done, .review, .progress, .problem, .todo]
+
+    private func count(_ s: NoteStatus?) -> Int { notes.filter { $0.status == s }.count }
+    private var remaining: Int { notes.count - count(.done) }
+    private var donePercent: Int { notes.isEmpty ? 0 : Int((Double(count(.done)) / Double(notes.count) * 100).rounded()) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            headline
+            ProgressSegments(segments: segments, total: notes.count)
+                .frame(height: 8)
+            chips
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brand.surface))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Brand.line, lineWidth: 1))
+    }
+
+    private var segments: [ProgressSegments.Segment] {
+        var list: [ProgressSegments.Segment] = []
+        for s in Self.barOrder {
+            let c = count(s)
+            if c > 0 { list.append(.init(id: s.rawValue, color: s.color, count: c)) }
+        }
+        let unset = count(nil)
+        if unset > 0 { list.append(.init(id: "none", color: Brand.line, count: unset)) }
+        return list
+    }
+
+    private var headline: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("\(remaining)")
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .foregroundStyle(Brand.text)
+            Text(remaining == 1 ? "rămasă din \(notes.count)" : "rămase din \(notes.count)")
+                .font(.subheadline)
+                .foregroundStyle(Brand.muted)
+            Spacer()
+            Text("\(donePercent)% gata")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(NoteStatus.done.color)
+        }
+    }
+
+    private var chips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(NoteStatus.allCases) { s in
+                    let c = count(s)
+                    if c > 0 || selection == s { chip(s, count: c) }
+                }
+            }
+        }
+    }
+
+    private func chip(_ s: NoteStatus, count: Int) -> some View {
+        let active = selection == s
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) { selection = active ? nil : s }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: s.icon).font(.caption).foregroundStyle(s.color)
+                Text(s.label).font(.subheadline.weight(.semibold)).foregroundStyle(Brand.text)
+                Text("\(count)").font(.caption.weight(.bold)).foregroundStyle(s.color)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(active ? s.color.opacity(0.22) : Brand.surfaceHi))
+            .overlay(Capsule().stroke(active ? s.color.opacity(0.8) : Color.clear, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Bară orizontală împărțită proporțional pe statusuri.
+struct ProgressSegments: View {
+    struct Segment: Identifiable {
+        let id: String
+        let color: Color
+        let count: Int
+    }
+
+    let segments: [Segment]
+    let total: Int
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 2) {
+                ForEach(segments) { seg in
+                    Capsule().fill(seg.color).frame(width: width(seg, in: geo.size.width))
+                }
+            }
+        }
+        .clipShape(Capsule())
+    }
+
+    private func width(_ seg: Segment, in full: CGFloat) -> CGFloat {
+        guard total > 0 else { return 0 }
+        let gaps = CGFloat(max(segments.count - 1, 0)) * 2
+        let share = (full - gaps) * CGFloat(seg.count) / CGFloat(total)
+        return max(3, share)
+    }
+}
+
+/// Notele unui proiect grupate pe status, în ordinea în care cer atenție; „Gata” strânse la final.
+struct StatusGroupedNotes: View {
+    let notes: [NoteMeta]
+    let grid: Bool
+    @Binding var showDone: Bool
+
+    private struct StatusGroup: Identifiable {
+        let id: String
+        let status: NoteStatus?
+        let notes: [NoteMeta]
+    }
+
+    private var groups: [StatusGroup] {
+        let order: [NoteStatus?] = [.problem, .progress, .review, .todo, nil, .done]
+        var list: [StatusGroup] = []
+        for s in order {
+            let items = notes.filter { $0.status == s }
+            if !items.isEmpty { list.append(StatusGroup(id: s?.rawValue ?? "none", status: s, notes: items)) }
+        }
+        return list
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(groups) { g in section(g) }
+        }
+    }
+
+    @ViewBuilder private func section(_ g: StatusGroup) -> some View {
+        let collapsible = g.status == .done
+        VStack(alignment: .leading, spacing: 8) {
+            header(g, collapsible: collapsible)
+            if !collapsible || showDone {
+                NotesCollection(notes: g.notes, grid: grid, showPath: false)
+            }
+        }
+    }
+
+    @ViewBuilder private func header(_ g: StatusGroup, collapsible: Bool) -> some View {
+        if collapsible {
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { showDone.toggle() }
+            } label: {
+                headerLabel(g, toggleText: showDone ? "Ascunde" : "Arată")
+            }
+            .buttonStyle(.plain)
+        } else {
+            headerLabel(g, toggleText: nil)
+        }
+    }
+
+    private func headerLabel(_ g: StatusGroup, toggleText: String?) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: g.status?.icon ?? "circle")
+                .foregroundStyle(g.status?.color ?? Brand.muted)
+            Text((g.status?.label ?? "Fără status").uppercased())
+                .font(.caption.weight(.bold))
+                .tracking(1)
+                .foregroundStyle(Brand.text)
+            Text("\(g.notes.count)")
+                .font(.caption)
+                .foregroundStyle(Brand.muted)
+            Spacer()
+            if let toggleText {
+                Text(toggleText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Brand.accent)
+            }
+        }
+        .contentShape(Rectangle())
     }
 }

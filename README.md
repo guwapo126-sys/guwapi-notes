@@ -99,3 +99,10 @@ Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
 - Widgeturi refăcute: „guwapi · Note” (status, etichete, client) și „guwapi · Status” (probleme / în lucru / gata, urgente).
 - Diagnostic legat de widget: verde (actualizat recent), galben (conectat, dar nepus/neactualizat), roșu (fără legătură); iconița de diagnostic ia aceeași culoare.
 - Cerință minimă: iOS 18.
+
+## Versiunea 0.7
+
+- 5 statusuri: ⚪ De făcut · 🟡 În lucru · 🟣 De verificat · 🔴 Problemă · 🟢 Gata.
+- Etichete: 🔥 Urgent · 🚨 Decizie client · 💡 Idee · 💬 De discutat · 🐛 Bug · 🔒 Securitate · 💀 Jale. Eticheta „În lucru” devine status (migrare automată).
+- Ecran de proiect: rezumat „X rămase din Y”, bară de progres, filtre pe status, note grupate pe status (implicit), „Gata” strânse.
+- Atingi bulina (listă) sau eticheta de status (card) și schimbi statusul direct; în modul grupat, tragi o notă în alt grup și preia statusul lui.

@@ -327,10 +327,12 @@ struct NotesWidgetView: View {
 }
 
 struct StatusCounts: View {
+    /// Pe spațiu mic arătăm ce cere atenție; „De făcut” apare în aplicație.
+    static let shown: [NoteStatus] = [.problem, .progress, .review, .done]
     let counts: [NoteStatus: Int]
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(NoteStatus.allCases) { s in
+            ForEach(StatusCounts.shown) { s in
                 HStack(spacing: 3) {
                     Circle().fill(s.color).frame(width: 7, height: 7)
                     Text("\(counts[s] ?? 0)")
@@ -399,7 +401,7 @@ struct StatusWidgetView: View {
         VStack(alignment: .leading, spacing: 2) {
             Label("guwapi · status", image: "guwapi.shield").font(.caption.weight(.bold))
             HStack(spacing: 10) {
-                ForEach(NoteStatus.allCases) { s in
+                ForEach([NoteStatus.problem, .progress, .review]) { s in
                     HStack(spacing: 3) {
                         Image(systemName: s.icon)
                         Text("\(entry.counts[s] ?? 0)").fontWeight(.bold)
@@ -413,7 +415,7 @@ struct StatusWidgetView: View {
     }
 
     private var small: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             BrandMark()
             Spacer(minLength: 0)
             ForEach(NoteStatus.allCases) { s in
@@ -422,13 +424,13 @@ struct StatusWidgetView: View {
                     Text(s.label).foregroundStyle(Brand.text)
                     Spacer()
                     Text("\(entry.counts[s] ?? 0)")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(s.color)
                 }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
             }
             if entry.urgent > 0 {
-                Text("🔥 \(entry.urgent) urgente deschise")
+                Text("🔥 \(entry.urgent) urgente")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Brand.text.opacity(0.85))
             }
