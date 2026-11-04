@@ -11,6 +11,7 @@ struct RootView: View {
     @State var folderDraft: FolderDraft?
     @State var showTemplates = false
     @State var showDiagnostics = false
+    @State var showImport = false
     @State var deleting: Folder?
 
     var body: some View {
@@ -86,6 +87,9 @@ struct RootView: View {
                         Button {
                             folderDraft = FolderDraft(folder: Folder(name: "", parentID: nil), isNew: true)
                         } label: { Label("Folder nou", systemImage: "folder.badge.plus") }
+                        Button { showImport = true } label: {
+                            Label("Importă fișiere sau folder…", systemImage: "square.and.arrow.down")
+                        }
                     } label: { Image(systemName: "plus.circle.fill").font(.title3) }
                 }
             }
@@ -100,6 +104,7 @@ struct RootView: View {
             .sheet(item: $folderDraft) { FolderEditorSheet(draft: $0) }
             .sheet(isPresented: $showTemplates) { TemplatePickerSheet(folderID: nil) }
             .sheet(isPresented: $showDiagnostics) { DiagnosticsView() }
+            .importer(isPresented: $showImport, into: nil)
             .confirmationDialog("Ștergi folderul „\(deleting?.name ?? "")”?",
                                 isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                                 titleVisibility: .visible) {
@@ -173,6 +178,7 @@ struct FolderScreen: View {
     @State var folderDraft: FolderDraft?
     @State var showTemplates = false
     @State var confirmDelete = false
+    @State var showImport = false
 
     private var folder: Folder? { store.folder(folderID) }
 
@@ -222,6 +228,9 @@ struct FolderScreen: View {
                         Label("Notă nouă", systemImage: "square.and.pencil")
                     }
                     Button { showTemplates = true } label: { Label("Din șablon…", systemImage: "doc.on.doc") }
+                    Button { showImport = true } label: {
+                        Label("Importă fișiere sau folder…", systemImage: "square.and.arrow.down")
+                    }
                     if let folder {
                         Button {
                             folderDraft = FolderDraft(folder: Folder(name: "", parentID: folder.id, colorHex: folder.colorHex), isNew: true)
@@ -239,6 +248,7 @@ struct FolderScreen: View {
         }
         .sheet(item: $folderDraft) { FolderEditorSheet(draft: $0) }
         .sheet(isPresented: $showTemplates) { TemplatePickerSheet(folderID: folderID) }
+        .importer(isPresented: $showImport, into: folderID)
         .confirmationDialog("Ștergi folderul?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Șterge folderul", role: .destructive) {
                 if let id = folderID { store.deleteFolder(id) }

@@ -943,17 +943,42 @@ enum OCR {
         let box: CGRect   // coordonate normalizate Vision (origine jos-stânga)
         var confidence: Float = 1
         var crop: UIImage? = nil
-        var isUnclear: Bool { confidence < OCR.minimumConfidence }
+        func isUnclear(_ threshold: Float) -> Bool { confidence < threshold }
     }
 
-    /// Sub acest scor, rândul e considerat citit nesigur.
-    static let minimumConfidence: Float = 0.5
+    /// Cât de strict marcăm rândurile citite nesigur.
+    enum Sensitivity: String, CaseIterable, Identifiable {
+        case strict, normal, relaxed
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .strict: return "Strict"
+            case .normal: return "Normal"
+            case .relaxed: return "Relaxat"
+            }
+        }
+        var threshold: Float {
+            switch self {
+            case .strict: return 0.99
+            case .normal: return 0.75
+            case .relaxed: return 0.4
+            }
+        }
+    }
+
+    /// Cuvinte tehnice care ajută corectura automată.
+    static let vocabulary = [
+        "commit", "commit-uri", "merge", "README", "README.md", "GitHub", "PR", "FAQ", "CLS", "header",
+        "footer", "layout", "load", "deploy", "branch", "rebase", "push", "pull", "docs", "design",
+        "foundation", "desktop", "touch", "rail", "sticky", "tile", "prod", "dev", "server", "API",
+        "Supabase", "Next.js", "React", "Vercel", "endpoint", "bug", "fix", "release", "staging"
+    ]
 
     /// Decupează rândul din pagină, cu puțină margine.
     static func crop(_ cg: CGImage, _ box: CGRect) -> UIImage? {
         let w = CGFloat(cg.width), h = CGFloat(cg.height)
         var rect = CGRect(x: box.minX * w, y: (1 - box.maxY) * h, width: box.width * w, height: box.height * h)
-        rect = rect.insetBy(dx: -rect.height * 0.3, dy: -rect.height * 0.35)
+        rect = rect.insetBy(dx: -rect.height * 0.25, dy: -rect.height * 0.12)
             .intersection(CGRect(x: 0, y: 0, width: w, height: h))
         guard !rect.isNull, rect.width > 4, rect.height > 4, let piece = cg.cropping(to: rect.integral) else { return nil }
         return UIImage(cgImage: piece)
@@ -968,14 +993,21 @@ enum OCR {
                 let request = VNRecognizeTextRequest()
                 request.recognitionLevel = .accurate
                 request.usesLanguageCorrection = true
-                request.automaticallyDetectsLanguage = true
+                request.customWords = OCR.vocabulary
+                let supported = (try? request.supportedRecognitionLanguages()) ?? []
+                let wanted = ["ro-RO", "en-US"].filter { supported.contains($0) }
+                if wanted.isEmpty {
+                    request.automaticallyDetectsLanguage = true
+                } else {
+                    request.recognitionLanguages = wanted
+                }
                 let handler = VNImageRequestHandler(cgImage: cg, orientation: .up)
                 try? handler.perform([request])
                 let lines: [Line] = (request.results ?? []).compactMap { obs in
                     guard let best = obs.topCandidates(1).first else { return nil }
                     var line = Line(text: best.string, box: obs.boundingBox)
                     line.confidence = best.confidence
-                    if line.isUnclear { line.crop = OCR.crop(cg, obs.boundingBox) }
+                    if best.confidence < 1 { line.crop = OCR.crop(cg, obs.boundingBox) }
                     return line
                 }
                 pages.append(lines)
@@ -985,13 +1017,13 @@ enum OCR {
     }
 
     /// Transformă rândurile în blocuri. `smart` recompune paragrafele; altfel păstrează rândurile.
-    static func blocks(from pages: [[Line]], smart: Bool) -> [OCRBlock] {
+    static func blocks(from pages: [[Line]], smart: Bool, threshold: Float = 0.75) -> [OCRBlock] {
         var out: [OCRBlock] = []
         for page in pages {
             let lines = page.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
             if !smart {
                 out += lines.map {
-                    $0.isUnclear
+                    $0.isUnclear(threshold)
                         ? OCRBlock(kind: .unclear, text: $0.text, image: $0.crop)
                         : OCRBlock(kind: .line, text: $0.text.trimmingCharacters(in: .whitespaces))
                 }
@@ -1015,7 +1047,7 @@ enum OCR {
                 let gap = previous.map { $0.box.minY - line.box.maxY } ?? 0
 
                 // Rând citit nesigur: separat, cu imaginea originală
-                if line.isUnclear {
+                if line.isUnclear(threshold) {
                     flush()
                     out.append(OCRBlock(kind: .unclear, text: t, image: line.crop))
                     previous = line
@@ -1078,7 +1110,13 @@ enum OCR {
     }
 
     static func bulletContent(_ t: String) -> String? {
-        for marker in ["• ", "- ", "* ", "◦ ", "– ", "· ", "▪ ", "○ ", "□ ", "☐ "] where t.hasPrefix(marker) {
+        // Puncte de listă: pot fi lipite de text („•Data”)
+        if let first = t.first, "•·▪◦○□☐●".contains(first) {
+            let rest = String(t.dropFirst()).trimmingCharacters(in: .whitespaces)
+            return rest.isEmpty ? nil : rest
+        }
+        // Liniuțe / steluțe: doar urmate de spațiu, ca să nu prindem „-5” sau „*args”
+        for marker in ["- ", "* ", "– ", "— "] where t.hasPrefix(marker) {
             return String(t.dropFirst(marker.count)).trimmingCharacters(in: .whitespaces)
         }
         return nil
@@ -1099,9 +1137,10 @@ struct ScanReviewSheet: View {
     @State var smart = true
     @State var includeImages = false
     @State var unclearMode: UnclearMode = .image
+    @State var sensitivity: OCR.Sensitivity = .normal
 
-    var blocks: [OCRBlock] { OCR.blocks(from: lines ?? [], smart: smart) }
-    var unclearCount: Int { (lines ?? []).joined().filter(\.isUnclear).count }
+    var blocks: [OCRBlock] { OCR.blocks(from: lines ?? [], smart: smart, threshold: sensitivity.threshold) }
+    var unclearCount: Int { (lines ?? []).joined().filter { $0.isUnclear(sensitivity.threshold) }.count }
 
     var body: some View {
         NavigationStack {
@@ -1111,6 +1150,16 @@ struct ScanReviewSheet: View {
                     Text("Rânduri ca pe hârtie").tag(false)
                 }
                 .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+
+                HStack {
+                    Text("Marchează rândurile nesigure:").font(.caption).foregroundStyle(Brand.muted)
+                    Picker("Sensibilitate", selection: $sensitivity) {
+                        ForEach(OCR.Sensitivity.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
                 .padding(16)
 
                 if unclearCount > 0 {

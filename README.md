@@ -79,3 +79,9 @@ Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
 - Șabloane predefinite + salvarea oricărei note ca șablon. Export Markdown și PDF.
 - Widget: notele fixate și următorul reminder, cu culoarea notei.
 - Notele din build-ul de test se mută automat, grupate pe client.
+
+## Versiunea 0.3
+
+- Import din Fișiere: Markdown, TXT, RTF, HTML, PDF sau un folder întreg (cu subfoldere), din meniul + al oricărui folder.
+- Scanare: paragrafe reconstruite, rânduri nesigure marcate (imaginea rândului / text marcat / omis), sensibilitate reglabilă.
+- Meniul Layout din editor: unește rânduri, curăță textul, mută paragrafe, aliniere, indentare, separator.
