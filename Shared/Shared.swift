@@ -2,16 +2,24 @@ import Foundation
 import Security
 import SwiftUI
 
-// MARK: - Brand (guwapi.com: fundal #07090B)
+// MARK: - Brand guwapi (paleta din iconița aplicației)
 
 enum Brand {
-    static let background = Color(hex: 0x07090B)
-    static let surface    = Color(hex: 0x12161A)
-    static let line       = Color(hex: 0x1F252B)
-    static let text       = Color(hex: 0xE8ECEF)
-    static let muted      = Color(hex: 0x8A949E)
-    /// Culoare de accent — înlocuiește cu hex-ul exact din logo-ul guwapi.
-    static let accent     = Color(hex: 0x4C8DFF)
+    static let background = Color(hex: 0x020813)
+    static let surface    = Color(hex: 0x0A1621)
+    static let surfaceHi  = Color(hex: 0x10202D)
+    static let line       = Color(hex: 0x173041)
+    static let text       = Color(hex: 0xE6F4F7)
+    static let muted      = Color(hex: 0x7F98A3)
+    static let accent     = Color(hex: 0x59E0EF)
+    static let teal       = Color(hex: 0x018190)
+
+    /// Culori disponibile pentru note, foldere și text.
+    static let palette: [(name: String, hex: String)] = [
+        ("Cyan", "59E0EF"), ("Teal", "018190"), ("Albastru", "4C8DFF"), ("Violet", "8B7CFF"),
+        ("Roz", "FF6FB5"), ("Roșu", "FF5A5F"), ("Portocaliu", "FF9F43"), ("Galben", "FFD166"),
+        ("Verde", "3DDC97"), ("Lime", "A3E635"), ("Alb", "E6F4F7"), ("Gri", "7F98A3")
+    ]
 }
 
 extension Color {
@@ -22,18 +30,90 @@ extension Color {
                   blue: Double(hex & 0xFF) / 255,
                   opacity: opacity)
     }
+
+    init(hexString: String?, fallback: UInt32 = 0x59E0EF) {
+        let clean = (hexString ?? "").replacingOccurrences(of: "#", with: "")
+        self.init(hex: UInt32(clean, radix: 16) ?? fallback)
+    }
 }
 
 // MARK: - Model
 
-struct Note: Codable, Identifiable, Hashable {
+struct Folder: Codable, Identifiable, Hashable {
     var id = UUID()
+    var name: String = "Folder nou"
+    var parentID: UUID? = nil
+    var colorHex: String = "59E0EF"
+    var icon: String = "folder.fill"
+    var created = Date()
+
+    init(name: String = "Folder nou", parentID: UUID? = nil, colorHex: String = "59E0EF", icon: String = "folder.fill") {
+        self.name = name
+        self.parentID = parentID
+        self.colorHex = colorHex
+        self.icon = icon
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Folder"
+        parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
+        colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex) ?? "59E0EF"
+        icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "folder.fill"
+        created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
+    }
+}
+
+struct NoteMeta: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var folderID: UUID? = nil
     var title: String = ""
-    var body: String = ""
-    var client: String = ""
+    var preview: String = ""
+    var plain: String = ""
+    var colorHex: String? = nil
     var pinned: Bool = false
+    var tags: [String] = []
     var reminder: Date? = nil
-    var updated: Date = Date()
+    var created = Date()
+    var updated = Date()
+
+    init(folderID: UUID? = nil) {
+        self.folderID = folderID
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        folderID = try c.decodeIfPresent(UUID.self, forKey: .folderID)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
+        plain = try c.decodeIfPresent(String.self, forKey: .plain) ?? ""
+        colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex)
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        reminder = try c.decodeIfPresent(Date.self, forKey: .reminder)
+        created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
+        updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? Date()
+    }
+
+    var displayTitle: String { title.isEmpty ? "Fără titlu" : title }
+}
+
+struct Library: Codable {
+    var folders: [Folder] = []
+    var notes: [NoteMeta] = []
+
+    init(folders: [Folder] = [], notes: [NoteMeta] = []) {
+        self.folders = folders
+        self.notes = notes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        folders = try c.decodeIfPresent([Folder].self, forKey: .folders) ?? []
+        notes = try c.decodeIfPresent([NoteMeta].self, forKey: .notes) ?? []
+    }
 }
 
 // MARK: - App Group
@@ -103,26 +183,44 @@ enum AppGroup {
     }
 }
 
-// MARK: - Stocare (JSON în containerul comun app + widget)
+// MARK: - Fișiere (comune app + widget)
 
-enum NoteFile {
-    static var url: URL {
-        let dir = AppGroup.containerURL
+enum LibraryFile {
+    static var directory: URL {
+        AppGroup.containerURL
             ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return dir.appendingPathComponent("notes.json")
     }
 
-    static func load() -> [Note] {
-        guard let data = try? Data(contentsOf: url) else { return [] }
+    static var url: URL { directory.appendingPathComponent("library.json") }
+    /// Fișierul din build-ul de test, folosit doar pentru migrare.
+    static var legacyURL: URL { directory.appendingPathComponent("notes.json") }
+
+    static var bodiesDirectory: URL { subdirectory("bodies") }
+    static var templatesDirectory: URL { subdirectory("templates") }
+
+    static func bodyURL(_ id: UUID) -> URL {
+        bodiesDirectory.appendingPathComponent("\(id.uuidString).note")
+    }
+
+    static func load() -> Library {
+        guard let data = try? Data(contentsOf: url) else { return Library() }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
-        return (try? dec.decode([Note].self, from: data)) ?? []
+        return (try? dec.decode(Library.self, from: data)) ?? Library()
     }
 
-    static func save(_ notes: [Note]) {
+    static func save(_ library: Library) {
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
-        guard let data = try? enc.encode(notes) else { return }
+        guard let data = try? enc.encode(library) else { return }
         try? data.write(to: url, options: .atomic)
+    }
+
+    private static func subdirectory(_ name: String) -> URL {
+        let dir = directory.appendingPathComponent(name, isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
     }
 }

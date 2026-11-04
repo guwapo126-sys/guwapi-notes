@@ -1,4 +1,4 @@
-# guwapi notes — build de test
+# guwapi notes
 
 Scopul acestui build este să confirme trei lucruri pe iPhone-ul tău, înainte de aplicația completă:
 
@@ -67,3 +67,15 @@ Trimite-mi rezultatul: screenshot din Diagnostic și din ecranul de blocare.
 | `.github/workflows/build.yml` | Compilarea pe Mac-ul din cloud și producerea `.ipa` |
 
 Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
+
+## Versiunea 0.2
+
+- Foldere în foldere (client → aplicație → note), fiecare cu culoare și iconiță.
+- Editor text formatat: Titlu, H1–H3, Cod, bold, italic, subliniat, tăiat, culori de text, evidențiere, fonturi (Standard, Rotunjit, Serif, Monospace), mărime.
+- Liste: bullet, numerotate, checklist (atinge cercul ca să bifezi). Enter continuă lista; Enter pe rând gol o închide.
+- Poze în notă, scanare document → text (Vision, local), Live Text din cameră.
+- Culoare pe fiecare notă; vizualizare carduri sau listă compactă (butonul din dreapta sus).
+- Etichete: scrie `#client` sau `#urgent` oriunde în notă. Căutare în toate notele.
+- Șabloane predefinite + salvarea oricărei note ca șablon. Export Markdown și PDF.
+- Widget: notele fixate și următorul reminder, cu culoarea notei.
+- Notele din build-ul de test se mută automat, grupate pe client.

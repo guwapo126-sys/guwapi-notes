@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
     TARGETED_DEVICE_FAMILY: "1"
     DEVELOPMENT_TEAM: ""
 targets:
@@ -23,7 +23,13 @@ targets:
         CFBundleDisplayName: guwapi notes
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+          UIImageRespectsSafeAreaInsets: true
+        NSCameraUsageDescription: Camera e folosită pentru scanarea documentelor și extragerea textului în note.
+        NSPhotoLibraryAddUsageDescription: Pentru salvarea imaginilor din note.
+        ITSAppUsesNonExemptEncryption: false
         UIUserInterfaceStyle: Dark
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         CFBundleURLTypes:
