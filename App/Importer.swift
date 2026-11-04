@@ -184,7 +184,7 @@ enum MarkdownImport {
             case .code:
                 var a = base
                 a[.font] = RT.font(style: .mono, design: .mono, bold: false, italic: false, size: max(13, t.size - 2))
-                a[.backgroundColor] = UIColor(hexString: "10202D")
+                a[.backgroundColor] = RT.codeBackground
                 out.append(NSAttributedString(string: inner, attributes: a))
             case .bold:
                 var a = base

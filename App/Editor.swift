@@ -169,7 +169,7 @@ final class EditorController: ObservableObject {
     func setColor(_ hex: String?) {
         modifySelection { a in
             if let hex {
-                a[.foregroundColor] = UIColor(hexString: hex)
+                a[.foregroundColor] = RT.textColor(hex)
                 a[.guwColor] = hex
             } else {
                 a[.foregroundColor] = RT.defaultText
@@ -326,7 +326,7 @@ final class EditorController: ObservableObject {
             var body = RT.attributes(.body, design: RT.design(of: typing))
             if let color = typing[.guwColor] as? String {
                 body[.guwColor] = color
-                body[.foregroundColor] = UIColor(hexString: color)
+                body[.foregroundColor] = RT.textColor(color)
             }
             tv.typingAttributes = body
             changed()
@@ -354,7 +354,7 @@ final class EditorController: ObservableObject {
                 storage.removeAttribute(.strikethroughStyle, range: textRange)
                 var restores: [(NSRange, UIColor)] = []
                 storage.enumerateAttribute(.guwColor, in: textRange) { value, r, _ in
-                    restores.append((r, (value as? String).map { UIColor(hexString: $0) } ?? RT.defaultText))
+                    restores.append((r, (value as? String).map { RT.textColor($0) } ?? RT.defaultText))
                 }
                 for (r, c) in restores { storage.addAttribute(.foregroundColor, value: c, range: r) }
             }
@@ -414,7 +414,7 @@ final class EditorController: ObservableObject {
         let blocks = mode == .skip ? all.filter { $0.kind != .unclear } : all
         guard let tv = textView, let storage, !blocks.isEmpty else { return }
         let design = RT.design(of: tv.typingAttributes)
-        let warn = UIColor(hexString: "FF9F43")
+        let warn = RT.textColor("FF9F43")
         let out = NSMutableAttributedString()
         for (i, b) in blocks.enumerated() {
             if i > 0 { out.append(NSAttributedString(string: "\n", attributes: RT.attributes(.body, design: design))) }
@@ -666,7 +666,7 @@ struct RichTextView: UIViewRepresentable {
         tv.keyboardDismissMode = .interactive
         tv.allowsEditingTextAttributes = true
         tv.tintColor = RT.accent
-        tv.keyboardAppearance = .dark
+        tv.keyboardAppearance = .default
         tv.autocorrectionType = .default
         tv.delegate = context.coordinator
 
@@ -675,7 +675,7 @@ struct RichTextView: UIViewRepresentable {
         tv.addGestureRecognizer(tap)
 
         let host = UIHostingController(rootView: FormatBar(controller: controller))
-        host.view.backgroundColor = UIColor(hexString: "0A1621")
+        host.view.backgroundColor = Brand.surfaceUI
         host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 52)
         host.view.autoresizingMask = [.flexibleWidth]
         context.coordinator.accessoryHost = host

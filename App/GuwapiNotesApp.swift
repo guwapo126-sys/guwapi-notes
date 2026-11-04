@@ -7,6 +7,7 @@ struct GuwapiNotesApp: App {
     @StateObject var store = LibraryStore()
     @StateObject var router = Router.shared
     @State var showSplash = true
+    @AppStorage(AppearanceMode.storageKey) var appearance = AppearanceMode.system.rawValue
 
     var body: some Scene {
         WindowGroup {
@@ -18,7 +19,7 @@ struct GuwapiNotesApp: App {
             }
             .environmentObject(store)
             .environmentObject(router)
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(AppearanceMode(rawValue: appearance)?.scheme)
             .tint(Brand.accent)
             .onOpenURL { router.handle($0) }
             .task {

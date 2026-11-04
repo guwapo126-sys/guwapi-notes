@@ -81,8 +81,9 @@ enum FontDesign: String, CaseIterable, Identifiable {
 enum ListKind { case bullet, number, check }
 
 extension UIColor {
+    /// Culoare fixă dintr-un hex (pentru imagini mici, PDF etc.).
     convenience init(hexString: String) {
-        let v = UInt32(hexString.replacingOccurrences(of: "#", with: ""), radix: 16) ?? 0xE6F4F7
+        let v = Adaptive.parse(hexString) ?? 0xE6F4F7
         self.init(red: CGFloat((v >> 16) & 0xFF) / 255,
                   green: CGFloat((v >> 8) & 0xFF) / 255,
                   blue: CGFloat(v & 0xFF) / 255,
@@ -93,9 +94,13 @@ extension UIColor {
 // MARK: - Text bogat: fonturi, stiluri, codare, export
 
 enum RT {
-    static let defaultText = UIColor(hexString: "E6F4F7")
-    static let mutedText = UIColor(hexString: "7F98A3")
-    static let accent = UIColor(hexString: "59E0EF")
+    static let defaultText = Brand.textUI
+    static let mutedText = Brand.mutedUI
+    static let accent = Brand.accentUI
+    static let codeBackground = Brand.surfaceHiUI
+
+    /// Culoarea de text pentru un hex ales (adaptivă).
+    static func textColor(_ hex: String) -> UIColor { Adaptive.ui(Adaptive.parse(hex) ?? 0xE6F4F7) }
 
     static func font(style: ParaStyle, design: FontDesign, bold: Bool, italic: Bool, size: CGFloat? = nil) -> UIFont {
         let pointSize = size ?? style.size
@@ -238,6 +243,7 @@ enum RT {
             }
         }
         for (range, a) in replacements { copy.addAttribute(.attachment, value: a, range: range) }
+        freezeColors(copy)
         return try? NSKeyedArchiver.archivedData(withRootObject: copy, requiringSecureCoding: false)
     }
 
@@ -264,7 +270,56 @@ enum RT {
         for (range, checked, attrs) in boxes.reversed() {
             s.replaceCharacters(in: range, with: checkbox(checked, base: attrs))
         }
+        adaptColors(s)
         return s
+    }
+
+    // MARK: Culori luminos / întunecat
+
+    private static let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
+
+    /// În fișier salvăm culorile fixe din modul întunecat (compatibil cu notele vechi).
+    private static func freezeColors(_ s: NSMutableAttributedString) {
+        let full = NSRange(location: 0, length: s.length)
+        for key in [NSAttributedString.Key.foregroundColor, .backgroundColor] {
+            var fixed: [(NSRange, UIColor)] = []
+            s.enumerateAttribute(key, in: full) { value, range, _ in
+                if let c = value as? UIColor { fixed.append((range, c.resolvedColor(with: darkTraits))) }
+            }
+            for (r, c) in fixed { s.addAttribute(key, value: c, range: r) }
+        }
+    }
+
+    /// La deschidere, culorile devin adaptive: textul normal urmează modul, culorile alese de tine
+    /// primesc varianta lizibilă pe fundal deschis.
+    private static func adaptColors(_ s: NSMutableAttributedString) {
+        let full = NSRange(location: 0, length: s.length)
+        var text: [(NSRange, UIColor)] = []
+        s.enumerateAttributes(in: full) { attrs, range, _ in
+            if let hex = attrs[.guwColor] as? String {
+                text.append((range, textColor(hex)))
+            } else if let c = attrs[.foregroundColor] as? UIColor, matches(c, 0x7F98A3) {
+                text.append((range, mutedText))
+            } else {
+                text.append((range, defaultText))
+            }
+        }
+        for (r, c) in text { s.addAttribute(.foregroundColor, value: c, range: r) }
+
+        var backgrounds: [NSRange] = []
+        s.enumerateAttribute(.backgroundColor, in: full) { value, range, _ in
+            if let c = value as? UIColor, matches(c, 0x10202D) { backgrounds.append(range) }
+        }
+        for r in backgrounds { s.addAttribute(.backgroundColor, value: codeBackground, range: r) }
+    }
+
+    private static func matches(_ color: UIColor, _ hex: UInt32) -> Bool {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard color.resolvedColor(with: darkTraits).getRed(&r, green: &g, blue: &b, alpha: &a) else { return false }
+        let target = Adaptive.rgb(hex)
+        var tr: CGFloat = 0, tg: CGFloat = 0, tb: CGFloat = 0, ta: CGFloat = 0
+        target.getRed(&tr, green: &tg, blue: &tb, alpha: &ta)
+        return abs(r - tr) < 0.03 && abs(g - tg) < 0.03 && abs(b - tb) < 0.03 && a > 0.9
     }
 
     // MARK: Rezumat pentru listă, căutare, widget
@@ -364,14 +419,17 @@ enum RT {
         renderer.setValue(NSValue(cgRect: page.insetBy(dx: 48, dy: 56)), forKey: "printableRect")
 
         let data = NSMutableData()
-        UIGraphicsBeginPDFContextToData(data, page, nil)
-        let pages = max(renderer.numberOfPages, 1)
-        renderer.prepare(forDrawingPages: NSRange(location: 0, length: pages))
-        for i in 0..<pages {
-            UIGraphicsBeginPDFPage()
-            renderer.drawPage(at: i, in: UIGraphicsGetPDFContextBounds())
+        // Hârtia e albă: culorile adaptive se rezolvă în varianta pentru fundal deschis
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+            UIGraphicsBeginPDFContextToData(data, page, nil)
+            let pages = max(renderer.numberOfPages, 1)
+            renderer.prepare(forDrawingPages: NSRange(location: 0, length: pages))
+            for i in 0..<pages {
+                UIGraphicsBeginPDFPage()
+                renderer.drawPage(at: i, in: UIGraphicsGetPDFContextBounds())
+            }
+            UIGraphicsEndPDFContext()
         }
-        UIGraphicsEndPDFContext()
         return data as Data
     }
 }

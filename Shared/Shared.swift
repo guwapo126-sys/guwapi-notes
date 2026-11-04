@@ -1,28 +1,112 @@
 import Foundation
 import Security
 import SwiftUI
+import UIKit
 
-// MARK: - Brand guwapi (paleta din iconița aplicației)
+// MARK: - Brand guwapi (paleta din iconița aplicației), adaptivă: luminos / întunecat
+
+/// Construiește culori care se schimbă singure după modul iPhone-ului (sau alegerea din aplicație).
+enum Adaptive {
+    static func rgb(_ hex: UInt32, alpha: CGFloat = 1) -> UIColor {
+        UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255,
+                green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255,
+                alpha: alpha)
+    }
+
+    static func pair(dark: UInt32, light: UInt32) -> UIColor {
+        UIColor { $0.userInterfaceStyle == .dark ? rgb(dark) : rgb(light) }
+    }
+
+    /// O culoare vie (galben, cyan, lime…) ușor de citit pe alb: o închidem până are contrast suficient.
+    static func lightVariant(_ hex: UInt32) -> UInt32 {
+        var r = CGFloat((hex >> 16) & 0xFF) / 255
+        var g = CGFloat((hex >> 8) & 0xFF) / 255
+        var b = CGFloat(hex & 0xFF) / 255
+        func luminance() -> CGFloat {
+            func lin(_ c: CGFloat) -> CGFloat { c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+            return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+        }
+        // Contrast ~3:1 față de alb => luminanță ≤ 0.30
+        var steps = 0
+        while luminance() > 0.30 && steps < 20 {
+            r *= 0.92; g *= 0.92; b *= 0.92
+            steps += 1
+        }
+        return (UInt32(r * 255) << 16) | (UInt32(g * 255) << 8) | UInt32(b * 255)
+    }
+
+    /// Culoarea pentru un hex ales de utilizator (note, foldere, etichete, text colorat).
+    static func ui(_ hex: UInt32) -> UIColor {
+        if hex == 0xE6F4F7 { return Brand.textUI }     // „Alb” = culoarea textului: neagră pe fundal deschis
+        return pair(dark: hex, light: lightVariant(hex))
+    }
+
+    static func parse(_ hexString: String?) -> UInt32? {
+        UInt32((hexString ?? "").replacingOccurrences(of: "#", with: ""), radix: 16)
+    }
+}
 
 enum Brand {
-    static let background = Color(hex: 0x020813)
-    static let surface    = Color(hex: 0x0A1621)
-    static let surfaceHi  = Color(hex: 0x10202D)
-    static let line       = Color(hex: 0x173041)
-    static let text       = Color(hex: 0xE6F4F7)
-    static let muted      = Color(hex: 0x7F98A3)
-    static let accent     = Color(hex: 0x59E0EF)
-    static let teal       = Color(hex: 0x018190)
+    static let backgroundUI = Adaptive.pair(dark: 0x020813, light: 0xF3F6F8)
+    static let surfaceUI    = Adaptive.pair(dark: 0x0A1621, light: 0xFFFFFF)
+    static let surfaceHiUI  = Adaptive.pair(dark: 0x10202D, light: 0xEAF0F3)
+    static let lineUI       = Adaptive.pair(dark: 0x173041, light: 0xD7E1E6)
+    static let textUI       = Adaptive.pair(dark: 0xE6F4F7, light: 0x0B1A24)
+    static let mutedUI      = Adaptive.pair(dark: 0x7F98A3, light: 0x5B707C)
+    static let accentUI     = Adaptive.pair(dark: 0x59E0EF, light: 0x0A8796)
+
+    static let background = Color(uiColor: backgroundUI)
+    static let surface    = Color(uiColor: surfaceUI)
+    static let surfaceHi  = Color(uiColor: surfaceHiUI)
+    static let line       = Color(uiColor: lineUI)
+    static let text       = Color(uiColor: textUI)
+    static let muted      = Color(uiColor: mutedUI)
+    static let accent     = Color(uiColor: accentUI)
+    static let teal       = Color(uiColor: Adaptive.pair(dark: 0x018190, light: 0x017A88))
 
     /// Culori disponibile pentru note, foldere și text.
     static let palette: [(name: String, hex: String)] = [
         ("Cyan", "59E0EF"), ("Teal", "018190"), ("Albastru", "4C8DFF"), ("Violet", "8B7CFF"),
         ("Roz", "FF6FB5"), ("Roșu", "FF5A5F"), ("Portocaliu", "FF9F43"), ("Galben", "FFD166"),
-        ("Verde", "3DDC97"), ("Lime", "A3E635"), ("Alb", "E6F4F7"), ("Gri", "7F98A3")
+        ("Verde", "3DDC97"), ("Lime", "A3E635"), ("Text", "E6F4F7"), ("Gri", "7F98A3")
     ]
 }
 
+/// Aspectul aplicației: urmează iPhone-ul sau e fixat.
+enum AppearanceMode: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+
+    static let storageKey = "appearance"
+
+    var label: String {
+        switch self {
+        case .system: return "Sistem"
+        case .light: return "Luminos"
+        case .dark: return "Întunecat"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max.fill"
+        case .dark: return "moon.fill"
+        }
+    }
+
+    var scheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
 extension Color {
+    /// Culoare fixă (aceeași în ambele moduri).
     init(hex: UInt32, opacity: Double = 1) {
         self.init(.sRGB,
                   red: Double((hex >> 16) & 0xFF) / 255,
@@ -31,9 +115,9 @@ extension Color {
                   opacity: opacity)
     }
 
+    /// Culoare aleasă de utilizator sau de status/etichetă: adaptivă, lizibilă pe ambele fundaluri.
     init(hexString: String?, fallback: UInt32 = 0x59E0EF) {
-        let clean = (hexString ?? "").replacingOccurrences(of: "#", with: "")
-        self.init(hex: UInt32(clean, radix: 16) ?? fallback)
+        self.init(uiColor: Adaptive.ui(Adaptive.parse(hexString) ?? fallback))
     }
 }
 

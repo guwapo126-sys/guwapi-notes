@@ -106,3 +106,9 @@ Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
 - Etichete: 🔥 Urgent · 🚨 Decizie client · 💡 Idee · 💬 De discutat · 🐛 Bug · 🔒 Securitate · 💀 Jale. Eticheta „În lucru” devine status (migrare automată).
 - Ecran de proiect: rezumat „X rămase din Y”, bară de progres, filtre pe status, note grupate pe status (implicit), „Gata” strânse.
 - Atingi bulina (listă) sau eticheta de status (card) și schimbi statusul direct; în modul grupat, tragi o notă în alt grup și preia statusul lui.
+
+## Versiunea 0.7.1
+
+- Mod luminos / întunecat: Setări (⚙︎) → Aspect: Sistem (urmează iPhone-ul), Luminos, Întunecat.
+- Culorile alese (note, foldere, etichete, text colorat) au variantă lizibilă pe fundal deschis; textul normal din note se adaptează automat.
+- Build de rezervă pe Codemagic (codemagic.yaml); GitHub Actions rulează pe macos-latest.

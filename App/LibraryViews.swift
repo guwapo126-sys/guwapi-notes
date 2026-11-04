@@ -13,6 +13,7 @@ struct RootView: View {
     @State var showDiagnostics = false
     @State var showImport = false
     @State var showTagManager = false
+    @State var showSettings = false
     @State var deleting: Folder?
 
     var body: some View {
@@ -33,7 +34,8 @@ struct RootView: View {
 
     private var rootSheets: RootSheets {
         RootSheets(folderDraft: $folderDraft, showTemplates: $showTemplates, showDiagnostics: $showDiagnostics,
-                   showImport: $showImport, showTagManager: $showTagManager, deleting: $deleting)
+                   showImport: $showImport, showTagManager: $showTagManager, showSettings: $showSettings,
+                   deleting: $deleting)
     }
 
     @ViewBuilder private var libraryContent: some View {
@@ -83,6 +85,9 @@ struct RootView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { showSettings = true } label: { Image(systemName: "gearshape") }
+        }
         ToolbarItem(placement: .topBarLeading) {
             Button { showDiagnostics = true } label: {
                 Image(systemName: "stethoscope").foregroundStyle(WidgetLink.current.color)
@@ -1465,6 +1470,7 @@ struct RootSheets: ViewModifier {
     @Binding var showDiagnostics: Bool
     @Binding var showImport: Bool
     @Binding var showTagManager: Bool
+    @Binding var showSettings: Bool
     @Binding var deleting: Folder?
 
     func body(content: Content) -> some View {
@@ -1474,6 +1480,7 @@ struct RootSheets: ViewModifier {
             .sheet(isPresented: $showDiagnostics) { DiagnosticsView() }
             .importer(isPresented: $showImport, into: nil)
             .sheet(isPresented: $showTagManager) { TagManagerSheet() }
+            .sheet(isPresented: $showSettings) { SettingsView() }
             .confirmationDialog(deleteTitle, isPresented: deletingBinding, titleVisibility: .visible) {
                 Button("Șterge folderul", role: .destructive) {
                     if let f = deleting { store.deleteFolder(f.id) }
@@ -1699,5 +1706,71 @@ struct StatusGroupedNotes: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+
+// MARK: - Setări
+
+struct SettingsView: View {
+    @Environment(\.dismiss) var dismiss
+    @AppStorage(AppearanceMode.storageKey) var appearance = AppearanceMode.system.rawValue
+
+    private var mode: AppearanceMode { AppearanceMode(rawValue: appearance) ?? .system }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    appearancePicker
+                } header: {
+                    sectionHeader("Aspect")
+                } footer: {
+                    Text(footer).foregroundStyle(Brand.muted)
+                }
+                .listRowBackground(Brand.surface)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Brand.background)
+            .navigationTitle("Setări")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Gata") { dismiss() }.bold() }
+        }
+    }
+
+    private var appearancePicker: some View {
+        HStack(spacing: 10) {
+            ForEach(AppearanceMode.allCases) { m in option(m) }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func option(_ m: AppearanceMode) -> some View {
+        let active = m == mode
+        return Button {
+            withAnimation(.easeInOut(duration: 0.25)) { appearance = m.rawValue }
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: m.icon)
+                    .font(.title2)
+                    .foregroundStyle(active ? Brand.accent : Brand.muted)
+                Text(m.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Brand.text)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(RoundedRectangle(cornerRadius: 12).fill(active ? Brand.accent.opacity(0.15) : Brand.surfaceHi))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(active ? Brand.accent : Color.clear, lineWidth: 1.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var footer: String {
+        switch mode {
+        case .system: return "Urmează modul iPhone-ului: se schimbă singur când activezi modul întunecat sau la apus, dacă ai setat automat."
+        case .light: return "Mereu luminos, indiferent de setarea iPhone-ului."
+        case .dark: return "Mereu întunecat, indiferent de setarea iPhone-ului."
+        }
     }
 }
