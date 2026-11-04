@@ -63,6 +63,7 @@ enum Route: Hashable {
     case all
     case tag(UUID)
     case note(UUID)
+    case proposals
 }
 
 @MainActor

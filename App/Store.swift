@@ -36,6 +36,9 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var notes: [NoteMeta] = []
     @Published private(set) var customTemplates: [CustomTemplate] = []
     @Published private(set) var tagDefs: [TagDef] = []
+    /// Propunerile lui Claude care așteaptă „Acceptă / Respinge”.
+    @Published private(set) var proposals: [Proposal] = []
+    private var resolvedProposals: [String] = []
     private var codeCounters: [String: Int] = [:]
 
     /// Apelat după fiecare schimbare locală salvată (sincronizarea se programează de aici).
@@ -47,6 +50,9 @@ final class LibraryStore: ObservableObject {
         folders = lib.folders
         notes = lib.notes
         codeCounters = lib.codeCounters ?? [:]
+        let proposalFile = ProposalFile.load()
+        proposals = proposalFile.pending
+        resolvedProposals = proposalFile.resolved
         var needsSave = false
         if let tags = lib.tags {
             tagDefs = tags
@@ -404,11 +410,12 @@ final class LibraryStore: ObservableObject {
 
     @discardableResult
     func createFolder(name: String, parent: UUID?, colorHex: String, icon: String,
-                      access: ClaudeAccess? = nil, hideTitles: Bool? = nil) -> UUID {
+                      access: ClaudeAccess? = nil, hideTitles: Bool? = nil, projectRepo: String? = nil) -> UUID {
         var f = Folder(name: name.isEmpty ? "Folder nou" : name, parentID: parent, colorHex: colorHex, icon: icon)
         // Folderele de pe primul nivel primesc nivelul implicit din Setări; subfolderele moștenesc
         f.access = access ?? (parent == nil ? Self.defaultAccess : nil)
         f.hideTitles = hideTitles
+        f.projectRepo = projectRepo
         folders.append(f)
         persist()
         return f.id
@@ -500,6 +507,91 @@ final class LibraryStore: ObservableObject {
         applyingRemote = true
         persist()
         applyingRemote = false
+    }
+
+    // MARK: Propunerile lui Claude
+
+    func proposals(for noteID: UUID) -> [Proposal] { proposals.filter { $0.noteID == noteID } }
+
+    /// Adaugă propuneri noi (fără dubluri și fără cele deja rezolvate). Întoarce câte s-au adăugat.
+    @discardableResult
+    func addProposals(_ incoming: [Proposal]) -> Int {
+        var known = Set(proposals.map(\.fingerprint)).union(resolvedProposals)
+        var added = 0
+        for p in incoming where !known.contains(p.fingerprint) {
+            proposals.append(p)
+            known.insert(p.fingerprint)
+            added += 1
+        }
+        if added > 0 { saveProposals() }
+        return added
+    }
+
+    func rejectProposal(_ id: UUID) {
+        guard let p = proposals.first(where: { $0.id == id }) else { return }
+        resolve(p)
+    }
+
+    /// Aplică propunerea în notă. Întoarce un mesaj dacă n-a reușit (propunerea rămâne, marcată).
+    @discardableResult
+    func acceptProposal(_ id: UUID) -> String? {
+        guard let p = proposals.first(where: { $0.id == id }) else { return nil }
+        switch p.kind {
+        case .update, .check, .newStep:
+            guard let noteID = p.noteID, note(noteID) != nil else {
+                return markFailed(p, "Nota nu mai există.")
+            }
+            let body = loadBody(noteID)
+            switch p.kind {
+            case .update:
+                RT.appendUpdate(to: body, text: p.text, evidence: p.evidence, author: p.author, date: p.createdAt)
+            case .newStep:
+                RT.appendStep(to: body, text: p.text)
+            default:
+                guard RT.checkStep(in: body, matching: p.text) else {
+                    return markFailed(p, "Nu am găsit pasul „\(p.text)” nebifat în notă. Respinge-l sau bifează-l manual.")
+                }
+            }
+            saveBody(noteID, body)
+        case .newNote:
+            let folderID = p.folderID ?? p.noteID.flatMap { note($0)?.folderID }
+            let body = NSMutableAttributedString(string: p.text, attributes: RT.attributes(.title))
+            if p.reason != nil || p.evidence != nil {
+                var muted = RT.attributes(.body)
+                muted[.foregroundColor] = RT.mutedText
+                muted[.guwColor] = "7F98A3"
+                let reasonLine: String? = p.reason.map { (r: String) -> String in "Motiv: \(r)" }
+                let evidenceLine: String? = p.evidence.map { (e: String) -> String in "Dovadă: \(e)" }
+                let lines: [String] = [reasonLine, evidenceLine].compactMap { $0 }
+                body.append(NSAttributedString(string: "\nPropusă de \(p.author). " + lines.joined(separator: " · "), attributes: muted))
+            }
+            let newID = createNote(in: folderID, body: body)
+            if var created = note(newID) {
+                created.status = .todo
+                update(created)
+            }
+        }
+        resolve(p)
+        return nil
+    }
+
+    private func markFailed(_ p: Proposal, _ message: String) -> String {
+        if let i = proposals.firstIndex(where: { $0.id == p.id }) {
+            proposals[i].failure = message
+            saveProposals()
+        }
+        return message
+    }
+
+    private func resolve(_ p: Proposal) {
+        proposals.removeAll { $0.id == p.id }
+        resolvedProposals.append(p.fingerprint)
+        if resolvedProposals.count > 400 { resolvedProposals.removeFirst(resolvedProposals.count - 400) }
+        saveProposals()
+    }
+
+    private func saveProposals() {
+        ProposalFile(pending: proposals, resolved: resolvedProposals).save()
     }
 
     /// Salvează fără să programeze sincronizarea (ex. coduri atribuite în timpul sincronizării).

@@ -20,6 +20,7 @@ struct NoteEditorScreen: View {
     @State var shareItem: ShareItem?
     @State var isOCRRunning = false
     @State var deleted = false
+    @State var showProposals = false
 
     private var meta: NoteMeta? { store.note(noteID) }
     private var tint: Color { meta?.colorHex.map { Color(hexString: $0) } ?? Brand.accent }
@@ -32,6 +33,9 @@ struct NoteEditorScreen: View {
         withMedia
             .sheet(isPresented: $showReminder) {
                 if let meta { ReminderSheet(meta: meta) }
+            }
+            .sheet(isPresented: $showProposals, onDismiss: reloadAfterProposals) {
+                NavigationStack { ProposalsScreen(noteID: noteID, showsDoneButton: true) }
             }
             .sheet(isPresented: $showMove) {
                 FolderPickerSheet(title: "Mută nota", current: meta?.folderID) { store.move(noteID, to: $0) }
@@ -100,12 +104,26 @@ struct NoteEditorScreen: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
             }
+            let pending = store.proposals(for: noteID).count
+            if pending > 0 {
+                ProposalsBanner(count: pending) {
+                    controller.flush()
+                    showProposals = true
+                }
+                .padding(.horizontal, 16)
+            }
             if let meta, !meta.tagIDs.isEmpty {
                 TagChips(note: meta)
                     .padding(.horizontal, 16)
             }
             RichTextView(initial: text, controller: controller, focusOnAppear: focusOnOpen)
         }
+    }
+
+    /// După propuneri acceptate, textul notei s-a schimbat în fișier: îl reîncărcăm în editor.
+    private func reloadAfterProposals() {
+        guard store.note(noteID) != nil else { return }
+        controller.reload(store.loadBody(noteID))
     }
 
     private var ocrProgress: some View {

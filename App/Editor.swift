@@ -61,6 +61,17 @@ final class EditorController: ObservableObject {
         save?(NSAttributedString(attributedString: tv.attributedText))
     }
 
+    /// Înlocuiește textul din editor (ex. după ce ai acceptat o propunere de la Claude).
+    func reload(_ text: NSAttributedString) {
+        pendingSave?.cancel()
+        pendingSave = nil
+        guard let tv = textView else { return }
+        let selection = tv.selectedRange
+        tv.attributedText = text
+        tv.selectedRange = NSRange(location: min(selection.location, text.length), length: 0)
+        refreshState()
+    }
+
     var currentText: NSAttributedString {
         NSAttributedString(attributedString: textView?.attributedText ?? NSAttributedString())
     }
@@ -883,8 +894,18 @@ struct FormatBar: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(on ? Brand.accent : Color.clear))
     }
 
+    /// Etichete pentru VoiceOver (iconițele singure nu spun nimic în română).
+    private static let spoken: [String: String] = [
+        "bold": "Îngroșat", "italic": "Cursiv", "underline": "Subliniat", "strikethrough": "Tăiat",
+        "checklist": "Checklist", "list.bullet": "Listă cu buline", "list.number": "Listă numerotată",
+        "keyboard.chevron.compact.down": "Ascunde tastatura"
+    ]
+
     private func barButton(_ name: String, on: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) { barIcon(name, on: on) }.buttonStyle(.plain)
+        Button(action: action) { barIcon(name, on: on) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Self.spoken[name] ?? name)
+            .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

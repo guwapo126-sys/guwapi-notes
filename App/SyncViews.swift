@@ -79,7 +79,10 @@ struct SyncSettingsSection: View {
         case .syncing: return "Se sincronizează…"
         case .ok(let date):
             let when = date.formatted(.relative(presentation: .named))
-            return sync.lastChanges > 0 ? "Sincronizat \(when) · \(sync.lastChanges) schimbări primite" : "Sincronizat \(when)"
+            var parts = ["Sincronizat \(when)"]
+            if sync.lastChanges > 0 { parts.append("\(sync.lastChanges) schimbări primite") }
+            if sync.lastProposals > 0 { parts.append("\(sync.lastProposals) propuneri noi") }
+            return parts.joined(separator: " · ")
         case .failed(let message): return message
         }
     }
@@ -137,7 +140,7 @@ struct SyncSettingsSection: View {
         guard enabled else {
             return "Pornește ca să-i dai voie lui Claude să vadă și să schimbe statusul și etichetele notelor din folderele pe care le alegi tu."
         }
-        return "Ajung în repo doar folderele setate pe „Status”: titlul, statusul și etichetele. Conținutul notelor nu pleacă de pe telefon. Atenție: git păstrează istoricul; ce a fost odată în repo rămâne în commit-urile vechi."
+        return "Fiecare folder trimite doar ce i-ai permis: 🏷️ Status și 📝 Jurnal = titlul, statusul și etichetele; 📄 Complet = și textul notei. 🔒 Privat nu trimite nimic. Atenție: git păstrează istoricul; ce a fost odată în repo rămâne în commit-urile vechi."
     }
 }
 
@@ -145,13 +148,15 @@ struct SyncSettingsSection: View {
 
 /// Valoarea aleasă în editor: moștenește (doar subfoldere) sau un nivel explicit.
 enum AccessChoice: String, CaseIterable, Identifiable {
-    case inherit, privat, status
+    case inherit, privat, status, journal, full
     var id: String { rawValue }
 
     init(_ access: ClaudeAccess?) {
         switch access {
         case .privat?: self = .privat
         case .status?: self = .status
+        case .journal?: self = .journal
+        case .full?: self = .full
         case nil: self = .inherit
         }
     }
@@ -161,8 +166,12 @@ enum AccessChoice: String, CaseIterable, Identifiable {
         case .inherit: return nil
         case .privat: return .privat
         case .status: return .status
+        case .journal: return .journal
+        case .full: return .full
         }
     }
+
+    static let explicit: [AccessChoice] = [.privat, .status, .journal, .full]
 }
 
 struct AccessSection: View {
@@ -174,7 +183,7 @@ struct AccessSection: View {
     private var inherited: ClaudeAccess { store.effectiveAccess(folder.parentID) }
     private var effective: ClaudeAccess { choice.access ?? inherited }
 
-    private var options: [AccessChoice] { isTopLevel ? [.privat, .status] : AccessChoice.allCases }
+    private var options: [AccessChoice] { isTopLevel ? AccessChoice.explicit : AccessChoice.allCases }
 
     var body: some View {
         Section {
@@ -185,8 +194,15 @@ struct AccessSection: View {
             }
             .pickerStyle(.inline)
             .labelsHidden()
-            if effective == .status {
+            if effective == .status || effective == .journal {
                 Toggle("Ascunde titlurile (doar coduri, ex. GIC-12)", isOn: hideBinding)
+            }
+            if effective.syncsStatus {
+                TextField("Repo proiect (ex. guwapo126-sys/ventures-site)", text: repoBinding)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.callout.monospaced())
+                    .accessibilityLabel("Repo-ul de cod al proiectului")
             }
         } header: {
             sectionHeader("Acces Claude")
@@ -199,18 +215,20 @@ struct AccessSection: View {
 
     private func label(_ option: AccessChoice) -> String {
         switch option {
-        case .inherit: return "Moștenește (\(inherited.label))"
-        case .privat: return "🔒 Privat"
-        case .status: return "🏷️ Status"
+        case .inherit: return "Moștenește (\(inherited.emoji) \(inherited.label))"
+        default:
+            let a = option.access ?? .privat
+            return "\(a.emoji) \(a.label)"
         }
     }
 
     private func icon(_ option: AccessChoice) -> String {
-        switch option {
-        case .inherit: return "arrow.turn.left.up"
-        case .privat: return ClaudeAccess.privat.icon
-        case .status: return ClaudeAccess.status.icon
-        }
+        option.access?.icon ?? "arrow.turn.left.up"
+    }
+
+    private var repoBinding: Binding<String> {
+        Binding(get: { folder.projectRepo ?? "" },
+                set: { folder.projectRepo = $0.isEmpty ? nil : $0 })
     }
 
     private var hideBinding: Binding<Bool> {
@@ -249,8 +267,9 @@ struct AccessBadge: View {
     let folderID: UUID
 
     var body: some View {
-        if sync.enabled && store.effectiveAccess(folderID) == .status {
-            Image(systemName: store.effectiveHideTitles(folderID) ? "number" : "tag.fill")
+        let access = store.effectiveAccess(folderID)
+        if sync.enabled && access.syncsStatus {
+            Image(systemName: store.effectiveHideTitles(folderID) && !access.syncsContent ? "number" : access.icon)
                 .font(.caption2)
                 .foregroundStyle(Brand.accent)
                 .accessibilityLabel("Claude vede statusul")
@@ -284,18 +303,32 @@ struct ClaudeVisibilityBar: View {
     @EnvironmentObject var sync: SyncEngine
     let note: NoteMeta
 
+    private var access: ClaudeAccess { store.effectiveAccess(note.folderID) }
+
+    private var text: String {
+        switch access {
+        case .privat:
+            return ""
+        case .status, .journal:
+            let what = store.effectiveHideTitles(note.folderID) ? "codul \(note.code ?? "…")" : "titlul"
+            return access == .journal
+                ? "Claude vede: \(what), statusul, etichetele · poate propune actualizări"
+                : "Claude vede: \(what), statusul, etichetele"
+        case .full:
+            return "Claude vede nota întreagă · poate propune actualizări și bife"
+        }
+    }
+
     var body: some View {
-        if sync.enabled && store.effectiveAccess(note.folderID) == .status {
+        if sync.enabled && access.syncsStatus {
             VStack(alignment: .leading, spacing: 2) {
-                Label(store.effectiveHideTitles(note.folderID)
-                      ? "Claude vede: codul \(note.code ?? "…"), statusul, etichetele"
-                      : "Claude vede: titlul, statusul, etichetele",
-                      systemImage: "eye")
+                Label(text, systemImage: access.icon)
                     .font(.caption2)
                     .foregroundStyle(Brand.muted)
                 ExternalChangeLine(note: note)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
         }
     }
 }

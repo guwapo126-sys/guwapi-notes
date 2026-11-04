@@ -40,6 +40,12 @@ struct RootView: View {
     }
 
     @ViewBuilder private var libraryContent: some View {
+        if !store.proposals.isEmpty {
+            Section {
+                NavigationLink(value: Route.proposals) { ProposalsEntryRow(count: store.proposals.count) }
+            }
+            .listRowBackground(Brand.surface)
+        }
         Section {
             NavigationLink(value: Route.all) {
                 shortcutRow("Toate notele", icon: "tray.full.fill", count: store.notes.count)
@@ -120,6 +126,8 @@ struct RootView: View {
             NotesScreen(title: tagTitle(id), source: .tag(id))
         case .note(let id):
             NoteEditorScreen(noteID: id)
+        case .proposals:
+            ProposalsScreen(noteID: nil)
         }
     }
 
@@ -548,6 +556,7 @@ struct NoteCard: View {
 
     var body: some View {
         cardContent
+            .accessibilityElement(children: .combine)
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 156, alignment: .topLeading)
             .background(cardBackground)
@@ -622,6 +631,11 @@ struct NoteListRow: View {
     var showPath = false
 
     var body: some View {
+        rowContent
+            .accessibilityElement(children: .combine)
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .top, spacing: 12) {
             StatusDot(note: note).padding(.top, 5)
             VStack(alignment: .leading, spacing: 2) {
@@ -780,7 +794,7 @@ struct FolderEditorSheet: View {
         if isNew {
             store.createFolder(name: name, parent: folder.parentID, colorHex: folder.colorHex, icon: folder.icon,
                                access: accessChoice.access ?? (folder.parentID == nil ? .privat : nil),
-                               hideTitles: folder.hideTitles)
+                               hideTitles: folder.hideTitles, projectRepo: folder.projectRepo)
         } else {
             var f = folder
             f.name = name.isEmpty ? "Folder" : name
@@ -1561,9 +1575,10 @@ struct ProjectSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            headline
+            headline.accessibilityElement(children: .combine)
             ProgressSegments(segments: segments, total: notes.count)
                 .frame(height: 8)
+                .accessibilityHidden(true)
             chips
         }
         .padding(14)

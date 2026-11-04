@@ -236,6 +236,8 @@ struct Folder: Codable, Identifiable, Hashable {
     var access: ClaudeAccess? = nil
     /// La nivelul „Status”: Claude vede coduri (GIC-12) în loc de titluri. nil = moștenește.
     var hideTitles: Bool? = nil
+    /// Repo-ul de cod al proiectului (ex. guwapo126-sys/ventures-site), ca Claude să lege notele de cod.
+    var projectRepo: String? = nil
 
     init(name: String = "Folder nou", parentID: UUID? = nil, colorHex: String = "59E0EF", icon: String = "folder.fill") {
         self.name = name
@@ -255,19 +257,33 @@ struct Folder: Codable, Identifiable, Hashable {
         sortMode = try c.decodeIfPresent(String.self, forKey: .sortMode)
         access = try? c.decodeIfPresent(ClaudeAccess.self, forKey: .access)
         hideTitles = try c.decodeIfPresent(Bool.self, forKey: .hideTitles)
+        projectRepo = try c.decodeIfPresent(String.self, forKey: .projectRepo)
     }
 }
 
-/// Nivelul de acces al lui Claude la un folder.
+/// Nivelul de acces al lui Claude la un folder. Fiecare nivel include tot ce face cel dinainte.
 enum ClaudeAccess: String, Codable, CaseIterable, Identifiable {
     case privat = "private"
     case status
+    case journal
+    case full
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .privat: return "Privat"
         case .status: return "Status"
+        case .journal: return "Status + jurnal"
+        case .full: return "Complet"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .privat: return "🔒"
+        case .status: return "🏷️"
+        case .journal: return "📝"
+        case .full: return "📄"
         }
     }
 
@@ -275,6 +291,17 @@ enum ClaudeAccess: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .privat: return "lock.fill"
         case .status: return "tag.fill"
+        case .journal: return "square.and.pencil"
+        case .full: return "doc.text.fill"
+        }
+    }
+
+    var slug: String {
+        switch self {
+        case .privat: return "privat"
+        case .status: return "status"
+        case .journal: return "jurnal"
+        case .full: return "complet"
         }
     }
 
@@ -282,8 +309,17 @@ enum ClaudeAccess: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .privat: return "Nimic nu pleacă de pe telefon."
         case .status: return "Claude vede titlul, statusul și etichetele. Conținutul rămâne pe telefon."
+        case .journal: return "Ca la Status, plus: Claude poate propune actualizări „ce s-a făcut”, cu dovadă. Textul notelor rămâne pe telefon."
+        case .full: return "Claude vede și textul și checklisturile notelor: poate propune bife, pași noi și follow-up-uri. Totul doar cu aprobarea ta."
         }
     }
+
+    /// Notele ajung în repo (titlu, status, etichete).
+    var syncsStatus: Bool { self != .privat }
+    /// Claude poate propune actualizări și note noi.
+    var allowsUpdates: Bool { self == .journal || self == .full }
+    /// Conținutul notei ajunge în repo; Claude poate propune bife și pași noi.
+    var syncsContent: Bool { self == .full }
 }
 
 struct NoteMeta: Codable, Identifiable, Hashable {

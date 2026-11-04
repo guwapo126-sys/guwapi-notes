@@ -120,3 +120,10 @@ Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
 - În repo ajung doar titlul, statusul și etichetele (`proiecte/<Client>/<Proiect>/<COD>.md`). Conținutul rămâne pe telefon.
 - Schimbările făcute de Claude în repo apar în aplicație cu ✨ „Claude · În lucru → De verificat”.
 - Sincronizare: la deschiderea aplicației, la tragere în jos și la câteva secunde după o schimbare.
+
+## Versiunea 0.9 — propunerile lui Claude
+
+- Niveluri de acces pe folder: 🔒 Privat · 🏷️ Status · 📝 Status + jurnal · 📄 Complet. Câmp „Repo proiect” (legătura cu codul).
+- Claude scrie propuneri în repo (`## Propuneri`): actualizare cu dovadă, bifă, pas nou, notă nouă. Pe telefon: ✨ „Claude propune” → Acceptă / Respinge (și glisare).
+- Fără dovadă, Claude nu propune (regula din CLAUDE.md).
+- Accesibilitate: etichete VoiceOver, butoane de 44 pt, „Reducere mișcare” respectată în ecranul de propuneri.
