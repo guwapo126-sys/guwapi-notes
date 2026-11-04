@@ -23,122 +23,128 @@ struct NoteEditorScreen: View {
 
     private var meta: NoteMeta? { store.note(noteID) }
     private var tint: Color { meta?.colorHex.map { Color(hexString: $0) } ?? Brand.accent }
+    private var gradientColors: [Color] {
+        let strength: Double = meta?.colorHex == nil ? 0 : 0.16
+        return [tint.opacity(strength), Color.clear]
+    }
 
     var body: some View {
-        Group {
-            if meta == nil && !deleted && initial == nil {
-                EmptyState(text: "Nota nu mai există.")
-            } else {
-                ZStack(alignment: .top) {
-                    Brand.background.ignoresSafeArea()
-                    LinearGradient(colors: [tint.opacity(meta?.colorHex == nil ? 0 : 0.16), .clear],
-                                   startPoint: .top, endPoint: .center)
-                        .ignoresSafeArea()
-                        .allowsHitTesting(false)
-                    if let initial {
-                        VStack(spacing: 0) {
-                            if let meta, !meta.tagIDs.isEmpty {
-                                TagChips(note: meta)
-                                    .padding(.horizontal, 16)
-                                    .padding(.top, 6)
-                            }
-                            RichTextView(initial: initial, controller: controller, focusOnAppear: focusOnOpen)
-                        }
-                    }
-                    if isOCRRunning {
-                        ProgressView("Extrag textul…")
-                            .padding(14)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(Brand.surfaceHi))
-                            .padding(.top, 40)
-                    }
-                }
+        withMedia
+            .sheet(isPresented: $showReminder) {
+                if let meta { ReminderSheet(meta: meta) }
             }
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Button { showMove = true } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder").font(.caption)
-                        Text(store.path(of: meta?.folderID)).font(.caption.weight(.semibold)).lineLimit(1)
-                    }
-                    .foregroundStyle(Brand.muted)
-                }
+            .sheet(isPresented: $showMove) {
+                FolderPickerSheet(title: "Mută nota", current: meta?.folderID) { store.move(noteID, to: $0) }
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Menu {
-                    ForEach(NoteStatus.allCases) { s in
-                        Button { store.setStatus(noteID, s) } label: {
-                            Label { Text(s.label) } icon: { Image(uiImage: StatusMenu.icon(s)) }
-                        }
-                    }
-                    Button { store.setStatus(noteID, nil) } label: { Label("Fără status", systemImage: "circle.slash") }
-                } label: {
-                    Image(systemName: meta?.status?.icon ?? "flag")
-                        .foregroundStyle(meta?.status?.color ?? Brand.text)
-                }
-                Button { showReminder = true } label: {
-                    Image(systemName: (meta?.reminder ?? .distantPast) > Date() ? "bell.badge.fill" : "bell")
-                }
-                Menu { noteMenu } label: { Image(systemName: "ellipsis.circle") }
+            .sheet(item: $shareItem) { ShareSheet(items: [$0.url]) }
+            .alert("Salvează ca șablon", isPresented: $showTemplateName) {
+                TextField("Nume șablon", text: $templateName)
+                Button("Salvează") { saveTemplate() }
+                Button("Anulează", role: .cancel) { templateName = "" }
             }
-        }
-        .onAppear { load() }
-        .onDisappear { close() }
-        .photosPicker(isPresented: $controller.showPhotoPicker, selection: $photoItem, matching: .images)
-        .onChange(of: photoItem) { _, item in
-            guard let item else { return }
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
-                    controller.insertImage(image)
-                }
-                photoItem = nil
+            .confirmationDialog("Ștergi nota?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Șterge", role: .destructive) { deleteNote() }
             }
-        }
-        .fullScreenCover(isPresented: $controller.showScanner) {
-            if DocumentScanner.isAvailable {
-                DocumentScanner { pages in
-                    controller.showScanner = false
-                    if !pages.isEmpty {
-                        scannedPages = pages
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showScanReview = true }
-                    }
-                }
+    }
+
+    /// Ecranul de bază + galerie, scaner și previzualizarea scanării.
+    private var withMedia: some View {
+        mainContent
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbarContent }
+            .onAppear { load() }
+            .onDisappear { close() }
+            .photosPicker(isPresented: $controller.showPhotoPicker, selection: $photoItem, matching: .images)
+            .onChange(of: photoItem) { _, item in handlePhoto(item) }
+            .fullScreenCover(isPresented: $controller.showScanner) { scannerCover }
+            .sheet(isPresented: $showScanReview, onDismiss: { scannedPages = [] }) { scanReview }
+    }
+
+    @ViewBuilder private var scannerCover: some View {
+        if DocumentScanner.isAvailable {
+            DocumentScanner { pages in handleScan(pages) }
                 .ignoresSafeArea()
-            } else {
-                VStack(spacing: 16) {
-                    Text("Scanarea nu e disponibilă pe acest dispozitiv.")
-                    Button("Închide") { controller.showScanner = false }
+        } else {
+            VStack(spacing: 16) {
+                Text("Scanarea nu e disponibilă pe acest dispozitiv.")
+                Button("Închide") { controller.showScanner = false }
+            }
+        }
+    }
+
+    private var scanReview: some View {
+        ScanReviewSheet(pages: scannedPages) { blocks, includeImages, mode in
+            insertScan(blocks, includeImages: includeImages, mode: mode)
+        }
+    }
+
+    @ViewBuilder private var mainContent: some View {
+        if meta == nil && !deleted && initial == nil {
+            EmptyState(text: "Nota nu mai există.")
+        } else {
+            ZStack(alignment: .top) {
+                Brand.background.ignoresSafeArea()
+                LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .center)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                if let initial { editorStack(initial) }
+                if isOCRRunning { ocrProgress }
+            }
+        }
+    }
+
+    private func editorStack(_ text: NSAttributedString) -> some View {
+        VStack(spacing: 0) {
+            if let meta, !meta.tagIDs.isEmpty {
+                TagChips(note: meta)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+            }
+            RichTextView(initial: text, controller: controller, focusOnAppear: focusOnOpen)
+        }
+    }
+
+    private var ocrProgress: some View {
+        ProgressView("Extrag textul…")
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Brand.surfaceHi))
+            .padding(.top, 40)
+    }
+
+    @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) { folderButton }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            statusMenu
+            Button { showReminder = true } label: {
+                Image(systemName: hasReminder ? "bell.badge.fill" : "bell")
+            }
+            Menu { noteMenu } label: { Image(systemName: "ellipsis.circle") }
+        }
+    }
+
+    private var hasReminder: Bool { (meta?.reminder ?? .distantPast) > Date() }
+
+    private var folderButton: some View {
+        Button { showMove = true } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "folder").font(.caption)
+                Text(store.path(of: meta?.folderID)).font(.caption.weight(.semibold)).lineLimit(1)
+            }
+            .foregroundStyle(Brand.muted)
+        }
+    }
+
+    private var statusMenu: some View {
+        Menu {
+            ForEach(NoteStatus.allCases) { s in
+                Button { store.setStatus(noteID, s) } label: {
+                    Label { Text(s.label) } icon: { Image(uiImage: StatusMenu.icon(s)) }
                 }
             }
-        }
-        .sheet(isPresented: $showScanReview, onDismiss: { scannedPages = [] }) {
-            ScanReviewSheet(pages: scannedPages) { blocks, includeImages, mode in
-                if includeImages { for p in scannedPages { controller.insertImage(p) } }
-                controller.insertBlocks(blocks, unclear: mode)
-            }
-        }
-        .sheet(isPresented: $showReminder) {
-            if let meta { ReminderSheet(meta: meta) }
-        }
-        .sheet(isPresented: $showMove) {
-            FolderPickerSheet(title: "Mută nota", current: meta?.folderID) { store.move(noteID, to: $0) }
-        }
-        .sheet(item: $shareItem) { ShareSheet(items: [$0.url]) }
-        .alert("Salvează ca șablon", isPresented: $showTemplateName) {
-            TextField("Nume șablon", text: $templateName)
-            Button("Salvează") {
-                store.saveTemplate(name: templateName, body: controller.currentText)
-                templateName = ""
-            }
-            Button("Anulează", role: .cancel) { templateName = "" }
-        }
-        .confirmationDialog("Ștergi nota?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Șterge", role: .destructive) {
-                deleted = true
-                store.deleteNote(noteID)
-                dismiss()
-            }
+            Button { store.setStatus(noteID, nil) } label: { Label("Fără status", systemImage: "circle.slash") }
+        } label: {
+            Image(systemName: meta?.status?.icon ?? "flag")
+                .foregroundStyle(meta?.status?.color ?? Brand.text)
         }
     }
 
@@ -163,6 +169,40 @@ struct NoteEditorScreen: View {
     }
 
     // MARK: Acțiuni
+
+    private func handlePhoto(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                controller.insertImage(image)
+            }
+            photoItem = nil
+        }
+    }
+
+    private func handleScan(_ pages: [UIImage]) {
+        controller.showScanner = false
+        if !pages.isEmpty {
+            scannedPages = pages
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showScanReview = true }
+        }
+    }
+
+    private func insertScan(_ blocks: [OCRBlock], includeImages: Bool, mode: UnclearMode) {
+        if includeImages { for p in scannedPages { controller.insertImage(p) } }
+        controller.insertBlocks(blocks, unclear: mode)
+    }
+
+    private func saveTemplate() {
+        store.saveTemplate(name: templateName, body: controller.currentText)
+        templateName = ""
+    }
+
+    private func deleteNote() {
+        deleted = true
+        store.deleteNote(noteID)
+        dismiss()
+    }
 
     private func load() {
         guard initial == nil, meta != nil else { return }

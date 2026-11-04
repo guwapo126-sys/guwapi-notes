@@ -312,3 +312,64 @@ enum LibraryFile {
         return dir
     }
 }
+
+// MARK: - Semnal de viață al widgetului (citit de Diagnostic)
+
+enum WidgetHeartbeat {
+    private static var url: URL { LibraryFile.directory.appendingPathComponent("widget-heartbeat.json") }
+
+    /// Widgetul notează când și-a refăcut ultima dată conținutul.
+    static func record(_ kind: String) {
+        var beats = read()
+        beats[kind] = Date()
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        if let data = try? enc.encode(beats) { try? data.write(to: url, options: .atomic) }
+    }
+
+    static func read() -> [String: Date] {
+        guard let data = try? Data(contentsOf: url) else { return [:] }
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        return (try? dec.decode([String: Date].self, from: data)) ?? [:]
+    }
+
+    static var latest: Date? { read().values.max() }
+}
+
+/// Starea legăturii app ↔ widget: verde / galben / roșu.
+enum WidgetLink {
+    case healthy(Date)
+    case waiting
+    case broken
+
+    static var current: WidgetLink {
+        guard AppGroup.resolvedID != nil else { return .broken }
+        if let last = WidgetHeartbeat.latest, Date().timeIntervalSince(last) < 6 * 3600 { return .healthy(last) }
+        return .waiting
+    }
+
+    var color: Color {
+        switch self {
+        case .healthy: return Color(hexString: "3DDC97")
+        case .waiting: return Color(hexString: "FFD166")
+        case .broken: return Color(hexString: "FF5A5F")
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .healthy: return "Widgetul e conectat"
+        case .waiting: return "Conectat, dar widgetul nu a raportat încă"
+        case .broken: return "Widgetul nu poate citi notele"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .healthy: return "checkmark.seal.fill"
+        case .waiting: return "hourglass"
+        case .broken: return "xmark.octagon.fill"
+        }
+    }
+}

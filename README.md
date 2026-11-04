@@ -91,3 +91,11 @@ Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
 - Status pe note (Problemă / În lucru / Gata): bulina din listă ia culoarea statusului; filtre în folder.
 - Ordine manuală: ții apăsat pe o notă și o tragi peste alta; peste un subfolder o muți în el. Sortare din ⇅.
 - Etichete separate de text (# din note nu mai creează etichete): 🔥 Urgent, 💡 Idee, 💬 De discutat, 💪 În lucru, 💀 Jale, 🚨 Decizie client + etichete proprii din „Gestionează etichetele”.
+
+## Versiunea 0.6
+
+- Import PDF cu structură: titluri după mărimea fontului, paragrafe, liste, tabele cu 2 coloane, imagini la locul lor; antet/subsol repetate eliminate. PDF scanat → paginile ca imagini.
+- Buton pe ecranul de blocare / Centrul de control cu glyph-ul guwapi (scut + rânduri), deschide aplicația.
+- Widgeturi refăcute: „guwapi · Note” (status, etichete, client) și „guwapi · Status” (probleme / în lucru / gata, urgente).
+- Diagnostic legat de widget: verde (actualizat recent), galben (conectat, dar nepus/neactualizat), roșu (fără legătură); iconița de diagnostic ia aceeași culoare.
+- Cerință minimă: iOS 18.

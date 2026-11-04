@@ -755,92 +755,17 @@ struct FormatBar: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                Menu {
-                    ForEach(ParaStyle.allCases) { s in
-                        Button { controller.apply(s) } label: {
-                            if controller.style == s { Label(s.label, systemImage: "checkmark") } else { Text(s.label) }
-                        }
-                    }
-                } label: {
-                    Text(controller.style.short)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .frame(minWidth: 40, minHeight: 36)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Brand.surfaceHi))
-                }
-
-                barButton("bold", on: controller.isBold) { controller.toggleBold() }
-                barButton("italic", on: controller.isItalic) { controller.toggleItalic() }
-                barButton("underline", on: controller.isUnderline) { controller.toggleUnderline() }
-                barButton("strikethrough", on: controller.isStrike) { controller.toggleStrike() }
-
+                styleMenu
+                characterButtons
                 divider
-
-                barButton("checklist") { controller.toggleList(.check) }
-                barButton("list.bullet") { controller.toggleList(.bullet) }
-                barButton("list.number") { controller.toggleList(.number) }
-
+                listButtons
                 divider
-
-                Menu {
-                    Button { controller.setColor(nil) } label: { Label("Implicit", systemImage: "circle.slash") }
-                    ForEach(Brand.palette, id: \.hex) { item in
-                        Button { controller.setColor(item.hex) } label: {
-                            Label { Text(item.name) } icon: { Image(uiImage: Swatch.image(item.hex)) }
-                        }
-                    }
-                } label: { barIcon("paintpalette.fill", tint: Brand.accent) }
-
-                Menu {
-                    Button { controller.setHighlight(nil) } label: { Label("Fără evidențiere", systemImage: "circle.slash") }
-                    ForEach(Brand.palette, id: \.hex) { item in
-                        Button { controller.setHighlight(item.hex) } label: {
-                            Label { Text(item.name) } icon: { Image(uiImage: Swatch.image(item.hex)) }
-                        }
-                    }
-                } label: { barIcon("highlighter") }
-
-                Menu {
-                    Section("Font") {
-                        ForEach(FontDesign.allCases) { d in
-                            Button(d.label) { controller.setDesign(d) }
-                        }
-                    }
-                    Section("Mărime") {
-                        Button { controller.changeSize(by: 2) } label: { Label("Mărește", systemImage: "plus") }
-                        Button { controller.changeSize(by: -2) } label: { Label("Micșorează", systemImage: "minus") }
-                    }
-                } label: { barIcon("textformat.size") }
-
-                Menu {
-                    Section("Paragraf") {
-                        Button { controller.joinLines() } label: { Label("Unește rândurile", systemImage: "arrow.right.to.line") }
-                        Button { controller.cleanUp() } label: { Label("Curăță textul", systemImage: "wand.and.stars") }
-                        Button { controller.moveParagraph(up: true) } label: { Label("Mută paragraful sus", systemImage: "arrow.up") }
-                        Button { controller.moveParagraph(up: false) } label: { Label("Mută paragraful jos", systemImage: "arrow.down") }
-                    }
-                    Section("Aliniere") {
-                        Button { controller.align(.left) } label: { Label("Stânga", systemImage: "text.alignleft") }
-                        Button { controller.align(.center) } label: { Label("Centru", systemImage: "text.aligncenter") }
-                        Button { controller.align(.right) } label: { Label("Dreapta", systemImage: "text.alignright") }
-                        Button { controller.align(.justified) } label: { Label("Justificat", systemImage: "text.justify") }
-                    }
-                    Section("Indentare") {
-                        Button { controller.indent(24) } label: { Label("Mărește indentarea", systemImage: "increase.indent") }
-                        Button { controller.indent(-24) } label: { Label("Micșorează indentarea", systemImage: "decrease.indent") }
-                    }
-                    Button { controller.insertSeparator() } label: { Label("Separator", systemImage: "minus") }
-                } label: { barIcon("text.alignleft") }
-
+                colorMenu
+                highlightMenu
+                fontMenu
+                layoutMenu
                 divider
-
-                Menu {
-                    Button { controller.showPhotoPicker = true } label: { Label("Poză din galerie", systemImage: "photo") }
-                    Button { controller.showScanner = true } label: { Label("Scanează document → text", systemImage: "doc.viewfinder") }
-                    if controller.canCaptureText {
-                        Button { controller.captureTextFromCamera() } label: { Label("Text din cameră (Live Text)", systemImage: "text.viewfinder") }
-                    }
-                } label: { barIcon("camera.fill") }
-
+                insertMenu
                 barButton("keyboard.chevron.compact.down") { controller.dismissKeyboard() }
             }
             .padding(.horizontal, 8)
@@ -848,6 +773,102 @@ struct FormatBar: View {
         }
         .foregroundStyle(Brand.text)
         .background(Brand.surface)
+    }
+
+    private var styleMenu: some View {
+        Menu {
+            ForEach(ParaStyle.allCases) { s in
+                Button { controller.apply(s) } label: {
+                    if controller.style == s { Label(s.label, systemImage: "checkmark") } else { Text(s.label) }
+                }
+            }
+        } label: {
+            Text(controller.style.short)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .frame(minWidth: 40, minHeight: 36)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Brand.surfaceHi))
+        }
+    }
+
+    @ViewBuilder private var characterButtons: some View {
+        barButton("bold", on: controller.isBold) { controller.toggleBold() }
+        barButton("italic", on: controller.isItalic) { controller.toggleItalic() }
+        barButton("underline", on: controller.isUnderline) { controller.toggleUnderline() }
+        barButton("strikethrough", on: controller.isStrike) { controller.toggleStrike() }
+    }
+
+    @ViewBuilder private var listButtons: some View {
+        barButton("checklist") { controller.toggleList(.check) }
+        barButton("list.bullet") { controller.toggleList(.bullet) }
+        barButton("list.number") { controller.toggleList(.number) }
+    }
+
+    private func swatchLabel(_ name: String, _ hex: String) -> some View {
+        Label { Text(name) } icon: { Image(uiImage: Swatch.image(hex)) }
+    }
+
+    private var colorMenu: some View {
+        Menu {
+            Button { controller.setColor(nil) } label: { Label("Implicit", systemImage: "circle.slash") }
+            ForEach(Brand.palette, id: \.hex) { item in
+                Button { controller.setColor(item.hex) } label: { swatchLabel(item.name, item.hex) }
+            }
+        } label: { barIcon("paintpalette.fill", tint: Brand.accent) }
+    }
+
+    private var highlightMenu: some View {
+        Menu {
+            Button { controller.setHighlight(nil) } label: { Label("Fără evidențiere", systemImage: "circle.slash") }
+            ForEach(Brand.palette, id: \.hex) { item in
+                Button { controller.setHighlight(item.hex) } label: { swatchLabel(item.name, item.hex) }
+            }
+        } label: { barIcon("highlighter") }
+    }
+
+    private var fontMenu: some View {
+        Menu {
+            Section("Font") {
+                ForEach(FontDesign.allCases) { d in
+                    Button(d.label) { controller.setDesign(d) }
+                }
+            }
+            Section("Mărime") {
+                Button { controller.changeSize(by: 2) } label: { Label("Mărește", systemImage: "plus") }
+                Button { controller.changeSize(by: -2) } label: { Label("Micșorează", systemImage: "minus") }
+            }
+        } label: { barIcon("textformat.size") }
+    }
+
+    private var layoutMenu: some View {
+        Menu {
+            Section("Paragraf") {
+                Button { controller.joinLines() } label: { Label("Unește rândurile", systemImage: "arrow.right.to.line") }
+                Button { controller.cleanUp() } label: { Label("Curăță textul", systemImage: "wand.and.stars") }
+                Button { controller.moveParagraph(up: true) } label: { Label("Mută paragraful sus", systemImage: "arrow.up") }
+                Button { controller.moveParagraph(up: false) } label: { Label("Mută paragraful jos", systemImage: "arrow.down") }
+            }
+            Section("Aliniere") {
+                Button { controller.align(.left) } label: { Label("Stânga", systemImage: "text.alignleft") }
+                Button { controller.align(.center) } label: { Label("Centru", systemImage: "text.aligncenter") }
+                Button { controller.align(.right) } label: { Label("Dreapta", systemImage: "text.alignright") }
+                Button { controller.align(.justified) } label: { Label("Justificat", systemImage: "text.justify") }
+            }
+            Section("Indentare") {
+                Button { controller.indent(24) } label: { Label("Mărește indentarea", systemImage: "increase.indent") }
+                Button { controller.indent(-24) } label: { Label("Micșorează indentarea", systemImage: "decrease.indent") }
+            }
+            Button { controller.insertSeparator() } label: { Label("Separator", systemImage: "minus") }
+        } label: { barIcon("text.alignleft") }
+    }
+
+    private var insertMenu: some View {
+        Menu {
+            Button { controller.showPhotoPicker = true } label: { Label("Poză din galerie", systemImage: "photo") }
+            Button { controller.showScanner = true } label: { Label("Scanează document → text", systemImage: "doc.viewfinder") }
+            if controller.canCaptureText {
+                Button { controller.captureTextFromCamera() } label: { Label("Text din cameră (Live Text)", systemImage: "text.viewfinder") }
+            }
+        } label: { barIcon("camera.fill") }
     }
 
     private var divider: some View {
@@ -1022,10 +1043,12 @@ enum OCR {
         for page in pages {
             let lines = page.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
             if !smart {
-                out += lines.map {
-                    $0.isUnclear(threshold)
-                        ? OCRBlock(kind: .unclear, text: $0.text, image: $0.crop)
-                        : OCRBlock(kind: .line, text: $0.text.trimmingCharacters(in: .whitespaces))
+                for line in lines {
+                    if line.isUnclear(threshold) {
+                        out.append(OCRBlock(kind: .unclear, text: line.text, image: line.crop))
+                    } else {
+                        out.append(OCRBlock(kind: .line, text: line.text.trimmingCharacters(in: .whitespaces)))
+                    }
                 }
                 continue
             }
@@ -1142,114 +1165,134 @@ struct ScanReviewSheet: View {
     var blocks: [OCRBlock] { OCR.blocks(from: lines ?? [], smart: smart, threshold: sensitivity.threshold) }
     var unclearCount: Int { (lines ?? []).joined().filter { $0.isUnclear(sensitivity.threshold) }.count }
 
+    private static let warn = Color(hex: 0xFF9F43)
+
+    private var unclearTitle: String {
+        unclearCount == 1 ? "1 rând nu a putut fi citit sigur" : "\(unclearCount) rânduri nu au putut fi citite sigur"
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("Mod", selection: $smart) {
-                    Text("Paragrafe").tag(true)
-                    Text("Rânduri ca pe hârtie").tag(false)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-
-                HStack {
-                    Text("Marchează rândurile nesigure:").font(.caption).foregroundStyle(Brand.muted)
-                    Picker("Sensibilitate", selection: $sensitivity) {
-                        ForEach(OCR.Sensitivity.allCases) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                .padding(16)
-
-                if unclearCount > 0 {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label(unclearCount == 1 ? "1 rând nu a putut fi citit sigur"
-                                                : "\(unclearCount) rânduri nu au putut fi citite sigur",
-                              systemImage: "exclamationmark.triangle.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color(hex: 0xFF9F43))
-                        Picker("Rânduri nesigure", selection: $unclearMode) {
-                            ForEach(UnclearMode.allCases) { Text($0.label).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xFF9F43, opacity: 0.12)))
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                }
-
-                if lines == nil {
-                    Spacer()
-                    ProgressView("Extrag textul…")
-                    Spacer()
-                } else if blocks.isEmpty {
-                    Spacer()
-                    Text("Nu am găsit text pe pagină.").foregroundStyle(Brand.muted)
-                    Spacer()
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: smart ? 10 : 2) {
-                            ForEach(blocks) { b in
-                                switch b.kind {
-                                case .heading:
-                                    Text(b.text).font(.title3.bold()).foregroundStyle(Brand.text)
-                                case .bullet:
-                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                        Text("•").foregroundStyle(Brand.accent)
-                                        Text(b.text).foregroundStyle(Brand.text)
-                                    }
-                                case .paragraph, .line:
-                                    Text(b.text).foregroundStyle(Brand.text)
-                                case .unclear:
-                                    if unclearMode != .skip {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            if unclearMode == .image, let img = b.image {
-                                                Image(uiImage: img)
-                                                    .resizable()
-                                                    .scaledToFit()
-                                                    .frame(maxHeight: 60, alignment: .leading)
-                                            }
-                                            Label(b.text.isEmpty ? "necitit" : b.text,
-                                                  systemImage: "exclamationmark.triangle.fill")
-                                                .font(.caption)
-                                                .foregroundStyle(Color(hex: 0xFF9F43))
-                                        }
-                                        .padding(6)
-                                        .background(RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color(hex: 0xFF9F43, opacity: 0.7), lineWidth: 1))
-                                    }
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(Brand.surface))
-                        .padding(.horizontal, 16)
-                    }
-                }
-
+                modePicker
+                sensitivityRow
+                if unclearCount > 0 { unclearBanner }
+                preview
                 Toggle("Adaugă și pozele paginilor", isOn: $includeImages)
                     .padding(16)
             }
             .background(Brand.background)
             .navigationTitle("Text scanat")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Anulează") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Inserează") {
-                        onInsert(blocks, includeImages, unclearMode)
-                        dismiss()
-                    }
-                    .bold()
-                    .disabled(lines == nil)
-                }
-            }
+            .toolbar { toolbarContent }
             .task {
                 if lines == nil { lines = await OCR.recognizeLines(pages) }
             }
+        }
+    }
+
+    private var modePicker: some View {
+        Picker("Mod", selection: $smart) {
+            Text("Paragrafe").tag(true)
+            Text("Rânduri ca pe hârtie").tag(false)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+    }
+
+    private var sensitivityRow: some View {
+        HStack {
+            Text("Marchează rândurile nesigure:").font(.caption).foregroundStyle(Brand.muted)
+            Picker("Sensibilitate", selection: $sensitivity) {
+                ForEach(OCR.Sensitivity.allCases) { s in Text(s.label).tag(s) }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(16)
+    }
+
+    private var unclearBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(unclearTitle, systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Self.warn)
+            Picker("Rânduri nesigure", selection: $unclearMode) {
+                ForEach(UnclearMode.allCases) { m in Text(m.label).tag(m) }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xFF9F43, opacity: 0.12)))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder private var preview: some View {
+        if lines == nil {
+            Spacer()
+            ProgressView("Extrag textul…")
+            Spacer()
+        } else if blocks.isEmpty {
+            Spacer()
+            Text("Nu am găsit text pe pagină.").foregroundStyle(Brand.muted)
+            Spacer()
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: smart ? 10 : 2) {
+                    ForEach(blocks) { b in blockView(b) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Brand.surface))
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    @ViewBuilder private func blockView(_ b: OCRBlock) -> some View {
+        switch b.kind {
+        case .heading:
+            Text(b.text).font(.title3.bold()).foregroundStyle(Brand.text)
+        case .bullet:
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("•").foregroundStyle(Brand.accent)
+                Text(b.text).foregroundStyle(Brand.text)
+            }
+        case .paragraph, .line:
+            Text(b.text).foregroundStyle(Brand.text)
+        case .unclear:
+            if unclearMode != .skip { unclearView(b) }
+        }
+    }
+
+    private func unclearView(_ b: OCRBlock) -> some View {
+        let label: String = b.text.isEmpty ? "necitit" : b.text
+        return VStack(alignment: .leading, spacing: 4) {
+            if unclearMode == .image, let img = b.image {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 60, alignment: .leading)
+            }
+            Label(label, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(Self.warn)
+        }
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: 8)
+            .stroke(Color(hex: 0xFF9F43, opacity: 0.7), lineWidth: 1))
+    }
+
+    @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) { Button("Anulează") { dismiss() } }
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Inserează") {
+                onInsert(blocks, includeImages, unclearMode)
+                dismiss()
+            }
+            .bold()
+            .disabled(lines == nil)
         }
     }
 }

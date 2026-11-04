@@ -206,12 +206,13 @@ final class LibraryStore: ObservableObject {
     func search(_ query: String) -> [NoteMeta] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
-        return Self.sorted(notes.filter {
-            $0.title.localizedCaseInsensitiveContains(q)
-                || $0.plain.localizedCaseInsensitiveContains(q)
-                || tags(of: $0).contains { $0.name.localizedCaseInsensitiveContains(q) }
-                || path(of: $0.folderID).localizedCaseInsensitiveContains(q)
-        })
+        return Self.sorted(notes.filter { n in matches(n, q) })
+    }
+
+    private func matches(_ n: NoteMeta, _ q: String) -> Bool {
+        if n.title.localizedCaseInsensitiveContains(q) || n.plain.localizedCaseInsensitiveContains(q) { return true }
+        if tags(of: n).contains(where: { $0.name.localizedCaseInsensitiveContains(q) }) { return true }
+        return path(of: n.folderID).localizedCaseInsensitiveContains(q)
     }
 
     /// Lista plată a folderelor, cu nivel de indentare, pentru selectoare.

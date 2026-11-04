@@ -52,7 +52,12 @@ enum MarkdownImport {
 
             if let m = match(#"^(#{1,6})\s+(.*)$"#, trimmed) {
                 let hashes = m[1].count
-                let style: ParaStyle = paragraphs.isEmpty && hashes == 1 ? .title : (hashes == 1 ? .h1 : hashes == 2 ? .h2 : .h3)
+                let style: ParaStyle
+                if hashes == 1 {
+                    style = paragraphs.isEmpty ? .title : .h1
+                } else {
+                    style = hashes == 2 ? .h2 : .h3
+                }
                 if paragraphs.isEmpty { firstIsHeading = true }
                 paragraphs.append(inline(m[2], RT.attributes(style)))
             } else if match(#"^(-{3,}|\*{3,}|_{3,})$"#, trimmed) != nil {
@@ -299,13 +304,7 @@ enum Importer {
             return MarkdownImport.attributed(doc.string, fallbackTitle: title)
         case "pdf":
             guard let pdf = PDFDocument(url: url) else { return nil }
-            var pages: [String] = []
-            for i in 0..<pdf.pageCount {
-                if let s = pdf.page(at: i)?.string { pages.append(s) }
-            }
-            let text = reflow(pages.joined(separator: "\n\n"))
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            return MarkdownImport.attributed(text, fallbackTitle: title)
+            return PDFStructureImport.attributed(pdf, fallbackTitle: title)
         default:
             return nil
         }
@@ -357,30 +356,38 @@ struct ImportModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .fileImporter(isPresented: $isPresented, allowedContentTypes: Importer.allowedTypes,
-                          allowsMultipleSelection: true) { result in
-                guard case .success(let urls) = result, !urls.isEmpty else { return }
-                let summary = Importer.run(urls, into: folderID, store: store)
-                if summary.notes.count == 1 && summary.folders == 0 && summary.skipped.isEmpty {
-                    router.open(summary.notes[0])
-                    return
-                }
-                var text = "Am importat \(summary.notes.count) " + (summary.notes.count == 1 ? "notă" : "note")
-                if summary.folders > 0 {
-                    text += " în \(summary.folders) " + (summary.folders == 1 ? "folder" : "foldere")
-                }
-                text += "."
-                if !summary.skipped.isEmpty {
-                    text += "\n\nNu am putut citi: " + summary.skipped.prefix(5).joined(separator: ", ")
-                    if summary.skipped.count > 5 { text += " și încă \(summary.skipped.count - 5)" }
-                    text += ".\nFișierele Word (.docx) le poți exporta ca PDF sau TXT și le imporți apoi."
-                }
-                message = text
-            }
-            .alert("Import", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
+                          allowsMultipleSelection: true) { result in handle(result) }
+            .alert("Import", isPresented: messageBinding) {
                 Button("OK") { message = nil }
             } message: {
                 Text(message ?? "")
             }
+    }
+
+    private var messageBinding: Binding<Bool> {
+        Binding(get: { message != nil }, set: { if !$0 { message = nil } })
+    }
+
+    private func handle(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, !urls.isEmpty else { return }
+        let summary = Importer.run(urls, into: folderID, store: store)
+        if summary.notes.count == 1 && summary.folders == 0 && summary.skipped.isEmpty {
+            router.open(summary.notes[0])
+            return
+        }
+        let noteWord = summary.notes.count == 1 ? "notă" : "note"
+        var text = "Am importat \(summary.notes.count) " + noteWord
+        if summary.folders > 0 {
+            let folderWord = summary.folders == 1 ? "folder" : "foldere"
+            text += " în \(summary.folders) " + folderWord
+        }
+        text += "."
+        if !summary.skipped.isEmpty {
+            text += "\n\nNu am putut citi: " + summary.skipped.prefix(5).joined(separator: ", ")
+            if summary.skipped.count > 5 { text += " și încă \(summary.skipped.count - 5)" }
+            text += ".\nFișierele Word (.docx) le poți exporta ca PDF sau TXT și le imporți apoi."
+        }
+        message = text
     }
 }
 
