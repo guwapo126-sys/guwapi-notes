@@ -170,7 +170,7 @@ struct GuwapiWidgetView: View {
 
     private func row(_ n: NoteMeta, detail: String, icon: String?) -> some View {
         HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 2).fill(color(n)).frame(width: 4, height: 28)
+            RoundedRectangle(cornerRadius: 2).fill(n.status?.color ?? color(n)).frame(width: 4, height: 28)
             VStack(alignment: .leading, spacing: 0) {
                 Text(n.displayTitle).font(.subheadline.weight(.semibold)).foregroundStyle(Brand.text).lineLimit(1)
                 HStack(spacing: 4) {

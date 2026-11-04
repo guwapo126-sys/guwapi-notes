@@ -251,6 +251,7 @@ enum Importer {
         let folderID = store.createFolder(name: url.lastPathComponent, parent: parent,
                                           colorHex: store.folder(parent)?.colorHex ?? "59E0EF", icon: "folder.fill")
         summary.folders += 1
+        let before = summary.notes.count
         let items = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey],
                                                                   options: [.skipsHiddenFiles])) ?? []
         for item in items.sorted(by: { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }) {
@@ -260,6 +261,9 @@ enum Importer {
                 importFile(item, folderID: folderID, store: store, summary: &summary)
             }
         }
+        // Notele importate direct în folder păstrează ordinea fișierelor
+        let direct = summary.notes[before...].filter { store.note($0)?.folderID == folderID }
+        store.setManualOrder(Array(direct), for: folderID)
     }
 
     @MainActor

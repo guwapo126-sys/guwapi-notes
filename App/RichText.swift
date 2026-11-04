@@ -425,8 +425,7 @@ struct BuiltInTemplate: Identifiable {
              .p(.h2, "Participanți"), .bullet(""),
              .p(.h2, "Agendă"), .bullet(""),
              .p(.h2, "Decizii"), .bullet(""),
-             .p(.h2, "Acțiuni"), .check(""),
-             .p(.body, "#meeting")]
+             .p(.h2, "Acțiuni"), .check("")]
         },
         BuiltInTemplate(id: "brief", name: "Brief client", icon: "briefcase.fill", colorHex: "59E0EF") {
             [.p(.title, "Brief — "),
@@ -434,8 +433,7 @@ struct BuiltInTemplate: Identifiable {
              .p(.h2, "Obiective"), .bullet(""),
              .p(.h2, "Livrabile"), .check(""),
              .p(.h2, "Termene"), .bullet(""),
-             .p(.h2, "Contacte"), .bullet(""),
-             .p(.body, "#brief")]
+             .p(.h2, "Contacte"), .bullet("")]
         },
         BuiltInTemplate(id: "deploy", name: "Checklist deploy", icon: "shippingbox.fill", colorHex: "3DDC97") {
             [.p(.title, "Deploy — \(today)"),
@@ -444,19 +442,17 @@ struct BuiltInTemplate: Identifiable {
              .p(.h3, "Lansare"),
              .check("Migrări rulate"), .check("Smoke test în producție"),
              .p(.h3, "După"),
-             .check("Loguri și monitorizare verificate"), .check("Client anunțat"),
-             .p(.body, "#deploy")]
+             .check("Loguri și monitorizare verificate"), .check("Client anunțat")]
         },
         BuiltInTemplate(id: "bug", name: "Bug / incident", icon: "ladybug.fill", colorHex: "FF5A5F") {
             [.p(.title, "Bug — "),
              .p(.h2, "Simptom"), .p(.body, ""),
              .p(.h2, "Pași de reproducere"), .bullet(""),
              .p(.h2, "Cauză"), .p(.body, ""),
-             .p(.h2, "Rezolvare"), .check("Fix implementat"), .check("Testat"), .check("Livrat"),
-             .p(.body, "#bug")]
+             .p(.h2, "Rezolvare"), .check("Fix implementat"), .check("Testat"), .check("Livrat")]
         },
         BuiltInTemplate(id: "idea", name: "Idee rapidă", icon: "lightbulb.fill", colorHex: "FFD166") {
-            [.p(.title, "Idee"), .p(.body, ""), .p(.body, "#idee")]
+            [.p(.title, "Idee"), .p(.body, "")]
         }
     ]
 }

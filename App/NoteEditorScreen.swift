@@ -36,7 +36,14 @@ struct NoteEditorScreen: View {
                         .ignoresSafeArea()
                         .allowsHitTesting(false)
                     if let initial {
-                        RichTextView(initial: initial, controller: controller, focusOnAppear: focusOnOpen)
+                        VStack(spacing: 0) {
+                            if let meta, !meta.tagIDs.isEmpty {
+                                TagChips(note: meta)
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 6)
+                            }
+                            RichTextView(initial: initial, controller: controller, focusOnAppear: focusOnOpen)
+                        }
                     }
                     if isOCRRunning {
                         ProgressView("Extrag textul…")
@@ -59,6 +66,17 @@ struct NoteEditorScreen: View {
                 }
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Menu {
+                    ForEach(NoteStatus.allCases) { s in
+                        Button { store.setStatus(noteID, s) } label: {
+                            Label { Text(s.label) } icon: { Image(uiImage: StatusMenu.icon(s)) }
+                        }
+                    }
+                    Button { store.setStatus(noteID, nil) } label: { Label("Fără status", systemImage: "circle.slash") }
+                } label: {
+                    Image(systemName: meta?.status?.icon ?? "flag")
+                        .foregroundStyle(meta?.status?.color ?? Brand.text)
+                }
                 Button { showReminder = true } label: {
                     Image(systemName: (meta?.reminder ?? .distantPast) > Date() ? "bell.badge.fill" : "bell")
                 }
@@ -129,6 +147,7 @@ struct NoteEditorScreen: View {
             Label(meta?.pinned == true ? "Anulează fixarea" : "Fixează sus (și pe widget)",
                   systemImage: meta?.pinned == true ? "pin.slash" : "pin")
         }
+        TagsMenu(noteID: noteID)
         ColorMenu(selected: meta?.colorHex) { store.setColor(noteID, $0) }
         Button { showMove = true } label: { Label("Mută în folder…", systemImage: "folder") }
         Button { showReminder = true } label: { Label("Reminder…", systemImage: "bell") }

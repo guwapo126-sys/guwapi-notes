@@ -85,3 +85,9 @@ Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
 - Import din Fișiere: Markdown, TXT, RTF, HTML, PDF sau un folder întreg (cu subfoldere), din meniul + al oricărui folder.
 - Scanare: paragrafe reconstruite, rânduri nesigure marcate (imaginea rândului / text marcat / omis), sensibilitate reglabilă.
 - Meniul Layout din editor: unește rânduri, curăță textul, mută paragrafe, aliniere, indentare, separator.
+
+## Versiunea 0.5
+
+- Status pe note (Problemă / În lucru / Gata): bulina din listă ia culoarea statusului; filtre în folder.
+- Ordine manuală: ții apăsat pe o notă și o tragi peste alta; peste un subfolder o muți în el. Sortare din ⇅.
+- Etichete separate de text (# din note nu mai creează etichete): 🔥 Urgent, 💡 Idee, 💬 De discutat, 💪 În lucru, 💀 Jale, 🚨 Decizie client + etichete proprii din „Gestionează etichetele”.

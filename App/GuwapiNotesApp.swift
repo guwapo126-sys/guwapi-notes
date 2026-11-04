@@ -52,7 +52,7 @@ struct SplashView: View {
 enum Route: Hashable {
     case folder(UUID?)
     case all
-    case tag(String)
+    case tag(UUID)
     case note(UUID)
 }
 

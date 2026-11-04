@@ -39,6 +39,80 @@ extension Color {
 
 // MARK: - Model
 
+/// Statusul unei note: problemă deschisă, în lucru, gata.
+enum NoteStatus: String, CaseIterable, Codable, Identifiable {
+    case problem, progress, done
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .problem: return "Problemă"
+        case .progress: return "În lucru"
+        case .done: return "Gata"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .problem: return "exclamationmark.circle.fill"
+        case .progress: return "clock.fill"
+        case .done: return "checkmark.circle.fill"
+        }
+    }
+
+    var hex: String {
+        switch self {
+        case .problem: return "FF5A5F"
+        case .progress: return "FFD166"
+        case .done: return "3DDC97"
+        }
+    }
+
+    var color: Color { Color(hexString: hex) }
+
+    /// Ordinea la sortarea după status: problemele primele.
+    var rank: Int {
+        switch self {
+        case .problem: return 0
+        case .progress: return 1
+        case .done: return 3
+        }
+    }
+}
+
+/// Etichetă definită de utilizator (tipul sau urgența notei). O notă poate avea mai multe.
+struct TagDef: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var name: String
+    var emoji: String
+    var colorHex: String
+
+    init(name: String, emoji: String, colorHex: String) {
+        self.name = name
+        self.emoji = emoji
+        self.colorHex = colorHex
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Etichetă"
+        emoji = try c.decodeIfPresent(String.self, forKey: .emoji) ?? "🏷️"
+        colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex) ?? "59E0EF"
+    }
+
+    var color: Color { Color(hexString: colorHex) }
+
+    static var defaults: [TagDef] {
+        [TagDef(name: "Urgent", emoji: "🔥", colorHex: "FF6B3D"),
+         TagDef(name: "Idee", emoji: "💡", colorHex: "8B7CFF"),
+         TagDef(name: "De discutat", emoji: "💬", colorHex: "4C8DFF"),
+         TagDef(name: "În lucru", emoji: "💪", colorHex: "FFD166"),
+         TagDef(name: "Jale", emoji: "💀", colorHex: "9AA5B1"),
+         TagDef(name: "Decizie client", emoji: "🚨", colorHex: "FF5A5F")]
+    }
+}
+
 struct Folder: Codable, Identifiable, Hashable {
     var id = UUID()
     var name: String = "Folder nou"
@@ -46,6 +120,8 @@ struct Folder: Codable, Identifiable, Hashable {
     var colorHex: String = "59E0EF"
     var icon: String = "folder.fill"
     var created = Date()
+    /// Modul de sortare al notelor din folder (vezi SortMode în aplicație).
+    var sortMode: String? = nil
 
     init(name: String = "Folder nou", parentID: UUID? = nil, colorHex: String = "59E0EF", icon: String = "folder.fill") {
         self.name = name
@@ -62,6 +138,7 @@ struct Folder: Codable, Identifiable, Hashable {
         colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex) ?? "59E0EF"
         icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "folder.fill"
         created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
+        sortMode = try c.decodeIfPresent(String.self, forKey: .sortMode)
     }
 }
 
@@ -77,6 +154,11 @@ struct NoteMeta: Codable, Identifiable, Hashable {
     var reminder: Date? = nil
     var created = Date()
     var updated = Date()
+    var status: NoteStatus? = nil
+    /// Etichetele notei (id-uri din Library.tags).
+    var tagIDs: [UUID] = []
+    /// Poziția în ordinea manuală a folderului.
+    var sortIndex: Double? = nil
 
     init(folderID: UUID? = nil) {
         self.folderID = folderID
@@ -95,6 +177,9 @@ struct NoteMeta: Codable, Identifiable, Hashable {
         reminder = try c.decodeIfPresent(Date.self, forKey: .reminder)
         created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
         updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? Date()
+        status = try? c.decodeIfPresent(NoteStatus.self, forKey: .status)
+        tagIDs = try c.decodeIfPresent([UUID].self, forKey: .tagIDs) ?? []
+        sortIndex = try c.decodeIfPresent(Double.self, forKey: .sortIndex)
     }
 
     var displayTitle: String { title.isEmpty ? "Fără titlu" : title }
@@ -103,16 +188,19 @@ struct NoteMeta: Codable, Identifiable, Hashable {
 struct Library: Codable {
     var folders: [Folder] = []
     var notes: [NoteMeta] = []
+    var tags: [TagDef]? = nil
 
-    init(folders: [Folder] = [], notes: [NoteMeta] = []) {
+    init(folders: [Folder] = [], notes: [NoteMeta] = [], tags: [TagDef]? = nil) {
         self.folders = folders
         self.notes = notes
+        self.tags = tags
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         folders = try c.decodeIfPresent([Folder].self, forKey: .folders) ?? []
         notes = try c.decodeIfPresent([NoteMeta].self, forKey: .notes) ?? []
+        tags = try c.decodeIfPresent([TagDef].self, forKey: .tags)
     }
 }
 

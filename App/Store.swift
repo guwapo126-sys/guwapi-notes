@@ -3,6 +3,27 @@ import UIKit
 import UserNotifications
 import WidgetKit
 
+enum SortMode: String, CaseIterable, Identifiable {
+    case manual, updated, title, status
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .manual: return "Ordinea mea"
+        case .updated: return "Ultima modificare"
+        case .title: return "Titlu"
+        case .status: return "Status"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .manual: return "hand.draw"
+        case .updated: return "clock"
+        case .title: return "textformat.abc"
+        case .status: return "flag"
+        }
+    }
+}
+
 struct CustomTemplate: Codable, Identifiable, Hashable {
     var id = UUID()
     var name: String
@@ -14,13 +35,33 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var notes: [NoteMeta] = []
     @Published private(set) var customTemplates: [CustomTemplate] = []
+    @Published private(set) var tagDefs: [TagDef] = []
 
     init() {
         let lib = LibraryFile.load()
         folders = lib.folders
         notes = lib.notes
+        var needsSave = false
+        if let tags = lib.tags {
+            tagDefs = tags
+        } else {
+            // Prima pornire cu etichete separate: etichetele implicite + curățarea celor vechi din #text
+            tagDefs = TagDef.defaults
+            for i in notes.indices where !notes[i].tags.isEmpty { notes[i].tags = [] }
+            needsSave = true
+        }
+        // Etichete implicite adăugate ulterior (o singură dată, dacă lipsesc)
+        let addedKey = "tags.added.decizieClient"
+        if !UserDefaults.standard.bool(forKey: addedKey) {
+            UserDefaults.standard.set(true, forKey: addedKey)
+            if !tagDefs.contains(where: { $0.name == "Decizie client" }) {
+                tagDefs.append(TagDef(name: "Decizie client", emoji: "🚨", colorHex: "FF5A5F"))
+                needsSave = true
+            }
+        }
         loadTemplates()
         migrateLegacyIfNeeded()
+        if needsSave { persist() }
     }
 
     // MARK: Interogări
@@ -38,7 +79,72 @@ final class LibraryStore: ObservableObject {
     }
 
     func notes(in folderID: UUID?) -> [NoteMeta] {
-        Self.sorted(notes.filter { $0.folderID == folderID })
+        Self.sorted(notes.filter { $0.folderID == folderID }, mode: sortMode(for: folderID))
+    }
+
+    func sortMode(for folderID: UUID?) -> SortMode {
+        let raw = folderID == nil
+            ? UserDefaults.standard.string(forKey: "rootSortMode")
+            : folder(folderID)?.sortMode
+        return SortMode(rawValue: raw ?? "") ?? .updated
+    }
+
+    func setSortMode(_ mode: SortMode, for folderID: UUID?) {
+        if let folderID, var f = folder(folderID) {
+            f.sortMode = mode.rawValue
+            updateFolder(f)
+        } else {
+            UserDefaults.standard.set(mode.rawValue, forKey: "rootSortMode")
+            objectWillChange.send()
+        }
+    }
+
+    /// Salvează ordinea aleasă de utilizator și trece folderul pe „Ordinea mea”.
+    func setManualOrder(_ ids: [UUID], for folderID: UUID?) {
+        for (i, id) in ids.enumerated() {
+            if let idx = notes.firstIndex(where: { $0.id == id }) { notes[idx].sortIndex = Double(i) }
+        }
+        if let folderID, var f = folder(folderID) {
+            f.sortMode = SortMode.manual.rawValue
+            if let i = folders.firstIndex(where: { $0.id == folderID }) { folders[i] = f }
+        } else {
+            UserDefaults.standard.set(SortMode.manual.rawValue, forKey: "rootSortMode")
+        }
+        persist()
+    }
+
+    /// Mută o notă cu o poziție mai sus / mai jos în folderul ei (trece folderul pe „Ordinea mea”).
+    func moveNote(_ id: UUID, up: Bool) {
+        guard let n = note(id) else { return }
+        var order = notes(in: n.folderID).filter { $0.pinned == n.pinned }.map(\.id)
+        guard let i = order.firstIndex(of: id) else { return }
+        let j = up ? i - 1 : i + 1
+        guard order.indices.contains(j) else { return }
+        order.swapAt(i, j)
+        let others = notes(in: n.folderID).filter { $0.pinned != n.pinned }.map(\.id)
+        setManualOrder(n.pinned ? order + others : others + order, for: n.folderID)
+    }
+
+    /// Drag & drop: pune nota trasă lângă nota țintă (după ea dacă vine de sus, înainte dacă vine de jos).
+    func moveNote(_ id: UUID, onto target: UUID) {
+        guard id != target, let dragged = note(id), let goal = note(target),
+              dragged.folderID == goal.folderID else { return }
+        var order = notes(in: dragged.folderID).map(\.id)
+        guard let from = order.firstIndex(of: id), let to = order.firstIndex(of: target) else { return }
+        order.remove(at: from)
+        let targetIndex = order.firstIndex(of: target) ?? to
+        order.insert(id, at: from < to ? targetIndex + 1 : targetIndex)
+        // Nota preia starea de „fixată” a zonei în care a fost lăsată
+        if dragged.pinned != goal.pinned, let i = notes.firstIndex(where: { $0.id == id }) {
+            notes[i].pinned = goal.pinned
+        }
+        setManualOrder(order, for: dragged.folderID)
+    }
+
+    func setStatus(_ id: UUID, _ status: NoteStatus?) {
+        guard var n = note(id) else { return }
+        n.status = status
+        update(n)
     }
 
     var allNotes: [NoteMeta] { Self.sorted(notes) }
@@ -64,13 +170,38 @@ final class LibraryStore: ObservableObject {
         return parts.isEmpty ? "Note rapide" : parts.joined(separator: " / ")
     }
 
-    var allTags: [(tag: String, count: Int)] {
-        var counts: [String: Int] = [:]
-        for n in notes { for t in n.tags { counts[t, default: 0] += 1 } }
-        return counts.map { (tag: $0.key, count: $0.value) }.sorted { $0.tag < $1.tag }
+    // MARK: Etichete
+
+    func tag(_ id: UUID) -> TagDef? { tagDefs.first { $0.id == id } }
+
+    /// Etichetele unei note, în ordinea din listă.
+    func tags(of note: NoteMeta) -> [TagDef] { tagDefs.filter { note.tagIDs.contains($0.id) } }
+
+    func tagCount(_ id: UUID) -> Int { notes.filter { $0.tagIDs.contains(id) }.count }
+
+    func notes(tagID: UUID) -> [NoteMeta] { Self.sorted(notes.filter { $0.tagIDs.contains(tagID) }) }
+
+    func toggleTag(_ tagID: UUID, on noteID: UUID) {
+        guard var n = note(noteID) else { return }
+        if let i = n.tagIDs.firstIndex(of: tagID) { n.tagIDs.remove(at: i) } else { n.tagIDs.append(tagID) }
+        update(n)
     }
 
-    func notes(tag: String) -> [NoteMeta] { Self.sorted(notes.filter { $0.tags.contains(tag) }) }
+    func saveTag(_ tag: TagDef) {
+        if let i = tagDefs.firstIndex(where: { $0.id == tag.id }) { tagDefs[i] = tag } else { tagDefs.append(tag) }
+        persist()
+    }
+
+    func deleteTag(_ id: UUID) {
+        tagDefs.removeAll { $0.id == id }
+        for i in notes.indices { notes[i].tagIDs.removeAll { $0 == id } }
+        persist()
+    }
+
+    func moveTags(from: IndexSet, to: Int) {
+        tagDefs.move(fromOffsets: from, toOffset: to)
+        persist()
+    }
 
     func search(_ query: String) -> [NoteMeta] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -78,6 +209,7 @@ final class LibraryStore: ObservableObject {
         return Self.sorted(notes.filter {
             $0.title.localizedCaseInsensitiveContains(q)
                 || $0.plain.localizedCaseInsensitiveContains(q)
+                || tags(of: $0).contains { $0.name.localizedCaseInsensitiveContains(q) }
                 || path(of: $0.folderID).localizedCaseInsensitiveContains(q)
         })
     }
@@ -104,10 +236,26 @@ final class LibraryStore: ObservableObject {
         return result
     }
 
-    private static func sorted(_ list: [NoteMeta]) -> [NoteMeta] {
-        list.sorted {
-            if $0.pinned != $1.pinned { return $0.pinned }
-            return $0.updated > $1.updated
+    private static func sorted(_ list: [NoteMeta], mode: SortMode = .updated) -> [NoteMeta] {
+        list.sorted { a, b in
+            if a.pinned != b.pinned { return a.pinned }
+            switch mode {
+            case .updated:
+                return a.updated > b.updated
+            case .title:
+                return a.displayTitle.localizedStandardCompare(b.displayTitle) == .orderedAscending
+            case .status:
+                let ra = a.status?.rank ?? 2, rb = b.status?.rank ?? 2
+                if ra != rb { return ra < rb }
+                return a.updated > b.updated
+            case .manual:
+                switch (a.sortIndex, b.sortIndex) {
+                case let (x?, y?): return x == y ? a.created < b.created : x < y
+                case (.some, nil): return true
+                case (nil, .some): return false
+                case (nil, nil): return a.created < b.created
+                }
+            }
         }
     }
 
@@ -117,6 +265,10 @@ final class LibraryStore: ObservableObject {
     func createNote(in folderID: UUID?, body: NSAttributedString? = nil, colorHex: String? = nil) -> UUID {
         var meta = NoteMeta(folderID: folderID)
         meta.colorHex = colorHex
+        if sortMode(for: folderID) == .manual {
+            let last = notes.filter { $0.folderID == folderID }.compactMap(\.sortIndex).max() ?? -1
+            meta.sortIndex = last + 1
+        }
         notes.insert(meta, at: 0)
         if let body {
             saveBody(meta.id, body)
@@ -144,7 +296,6 @@ final class LibraryStore: ObservableObject {
         notes[i].title = info.title
         notes[i].preview = info.preview
         notes[i].plain = info.plain
-        notes[i].tags = info.tags
         notes[i].updated = Date()
         persist()
     }
@@ -263,7 +414,7 @@ final class LibraryStore: ObservableObject {
     // MARK: Persistență
 
     private func persist() {
-        LibraryFile.save(Library(folders: folders, notes: notes))
+        LibraryFile.save(Library(folders: folders, notes: notes, tags: tagDefs))
         WidgetCenter.shared.reloadAllTimelines()
     }
 

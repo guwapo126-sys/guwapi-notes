@@ -12,6 +12,7 @@ struct RootView: View {
     @State var showTemplates = false
     @State var showDiagnostics = false
     @State var showImport = false
+    @State var showTagManager = false
     @State var deleting: Folder?
 
     var body: some View {
@@ -41,20 +42,22 @@ struct RootView: View {
                     } header: { sectionHeader("Clienți și foldere") }
                     .listRowBackground(Brand.surface)
 
-                    if !store.allTags.isEmpty {
-                        Section {
-                            ForEach(store.allTags, id: \.tag) { item in
-                                NavigationLink(value: Route.tag(item.tag)) {
-                                    HStack {
-                                        Text("#\(item.tag)").foregroundStyle(Brand.text)
-                                        Spacer()
-                                        Text("\(item.count)").font(.caption).foregroundStyle(Brand.muted)
-                                    }
+                    Section {
+                        ForEach(store.tagDefs) { tag in
+                            NavigationLink(value: Route.tag(tag.id)) {
+                                HStack(spacing: 12) {
+                                    Text(tag.emoji).frame(width: 26)
+                                    Text(tag.name).foregroundStyle(Brand.text)
+                                    Spacer()
+                                    Text("\(store.tagCount(tag.id))").font(.caption).foregroundStyle(Brand.muted)
                                 }
                             }
-                        } header: { sectionHeader("Etichete") }
-                        .listRowBackground(Brand.surface)
-                    }
+                        }
+                        Button { showTagManager = true } label: {
+                            Label("Gestionează etichetele", systemImage: "tag").foregroundStyle(Brand.accent)
+                        }
+                    } header: { sectionHeader("Etichete") }
+                    .listRowBackground(Brand.surface)
                 } else {
                     let results = store.search(search)
                     Section {
@@ -97,7 +100,8 @@ struct RootView: View {
                 switch route {
                 case .folder(let id): FolderScreen(folderID: id)
                 case .all: NotesScreen(title: "Toate notele", source: .all)
-                case .tag(let tag): NotesScreen(title: "#\(tag)", source: .tag(tag))
+                case .tag(let id):
+                    NotesScreen(title: store.tag(id).map { "\($0.emoji) \($0.name)" } ?? "Etichetă", source: .tag(id))
                 case .note(let id): NoteEditorScreen(noteID: id)
                 }
             }
@@ -105,6 +109,7 @@ struct RootView: View {
             .sheet(isPresented: $showTemplates) { TemplatePickerSheet(folderID: nil) }
             .sheet(isPresented: $showDiagnostics) { DiagnosticsView() }
             .importer(isPresented: $showImport, into: nil)
+            .sheet(isPresented: $showTagManager) { TagManagerSheet() }
             .confirmationDialog("Ștergi folderul „\(deleting?.name ?? "")”?",
                                 isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                                 titleVisibility: .visible) {
@@ -179,12 +184,19 @@ struct FolderScreen: View {
     @State var showTemplates = false
     @State var confirmDelete = false
     @State var showImport = false
+    @State var showReorder = false
+    @State var statusFilter: NoteStatus?
+    @State var tagFilter: UUID?
+    @State var folderDropTarget: UUID?
 
     private var folder: Folder? { store.folder(folderID) }
 
     var body: some View {
         let subs = store.subfolders(of: folderID)
-        let notes = store.notes(in: folderID)
+        let allNotes = store.notes(in: folderID)
+        let notes = allNotes.filter { n in
+            (statusFilter == nil || n.status == statusFilter) && (tagFilter.map { n.tagIDs.contains($0) } ?? true)
+        }
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let folder, folder.parentID != nil {
@@ -205,13 +217,28 @@ struct FolderScreen: View {
                                     Label("Editează", systemImage: "pencil")
                                 }
                             }
+                            .dropDestination(for: String.self) { items, _ in
+                                guard let raw = items.first, let id = UUID(uuidString: raw) else { return false }
+                                store.move(id, to: sub.id)
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                return true
+                            } isTargeted: { hovering in
+                                folderDropTarget = hovering ? sub.id : (folderDropTarget == sub.id ? nil : folderDropTarget)
+                            }
+                            .background(RoundedRectangle(cornerRadius: 10)
+                                .fill(folderDropTarget == sub.id ? Brand.accent.opacity(0.18) : Color.clear))
                             if sub.id != subs.last?.id { Divider().overlay(Brand.line).padding(.leading, 52) }
                         }
                     }
                     .background(RoundedRectangle(cornerRadius: 14).fill(Brand.surface))
                 }
-                if notes.isEmpty && subs.isEmpty {
+                if !allNotes.isEmpty {
+                    StatusFilterBar(notes: allNotes, selection: $statusFilter, tagSelection: $tagFilter)
+                }
+                if allNotes.isEmpty && subs.isEmpty {
                     EmptyState(text: "Folder gol. Adaugă o notă sau un subfolder din butonul +.")
+                } else if notes.isEmpty && (statusFilter != nil || tagFilter != nil) {
+                    EmptyState(text: "Nicio notă cu acest filtru.")
                 } else {
                     NotesCollection(notes: notes, grid: grid, showPath: false)
                 }
@@ -222,6 +249,18 @@ struct FolderScreen: View {
         .navigationTitle(folder?.name ?? "Note rapide")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Sortare", selection: Binding(get: { store.sortMode(for: folderID) },
+                                                         set: { store.setSortMode($0, for: folderID) })) {
+                        ForEach(SortMode.allCases) { Label($0.label, systemImage: $0.icon).tag($0) }
+                    }
+                    Divider()
+                    Button { showReorder = true } label: { Label("Aranjează ordinea…", systemImage: "line.3.horizontal") }
+                    Divider()
+                    Button { grid.toggle() } label: {
+                        Label(grid ? "Vezi ca listă" : "Vezi ca grilă", systemImage: grid ? "list.bullet" : "square.grid.2x2")
+                    }
+                } label: { Image(systemName: "arrow.up.arrow.down") }
                 Button { grid.toggle() } label: { Image(systemName: grid ? "list.bullet" : "square.grid.2x2") }
                 Menu {
                     Button { router.open(store.createNote(in: folderID, colorHex: nil)) } label: {
@@ -249,6 +288,7 @@ struct FolderScreen: View {
         .sheet(item: $folderDraft) { FolderEditorSheet(draft: $0) }
         .sheet(isPresented: $showTemplates) { TemplatePickerSheet(folderID: folderID) }
         .importer(isPresented: $showImport, into: folderID)
+        .sheet(isPresented: $showReorder) { ReorderSheet(folderID: folderID) }
         .confirmationDialog("Ștergi folderul?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Șterge folderul", role: .destructive) {
                 if let id = folderID { store.deleteFolder(id) }
@@ -260,7 +300,7 @@ struct FolderScreen: View {
 
 /// Toate notele sau o etichetă.
 struct NotesScreen: View {
-    enum Source { case all, tag(String) }
+    enum Source { case all, tag(UUID) }
 
     @EnvironmentObject var store: LibraryStore
     @AppStorage("notesGridMode") var grid = true
@@ -271,7 +311,7 @@ struct NotesScreen: View {
         let notes: [NoteMeta] = {
             switch source {
             case .all: return store.allNotes
-            case .tag(let t): return store.notes(tag: t)
+            case .tag(let t): return store.notes(tagID: t)
             }
         }()
         ScrollView {
@@ -310,6 +350,7 @@ struct NotesCollection: View {
     let showPath: Bool
     @State var moving: NoteMeta?
     @State var deleting: NoteMeta?
+    @State var dropTarget: UUID?
 
     var body: some View {
         Group {
@@ -319,6 +360,9 @@ struct NotesCollection: View {
                         NavigationLink(value: Route.note(note.id)) { NoteCard(note: note, showPath: showPath) }
                             .buttonStyle(.plain)
                             .contextMenu { menu(note) }
+                            .modifier(NoteDrag(note: note, enabled: !showPath, cornerRadius: 16, target: $dropTarget) {
+                                store.moveNote($0, onto: note.id)
+                            })
                     }
                 }
             } else {
@@ -331,6 +375,9 @@ struct NotesCollection: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu { menu(note) }
+                        .modifier(NoteDrag(note: note, enabled: !showPath, cornerRadius: 10, target: $dropTarget) {
+                            store.moveNote($0, onto: note.id)
+                        })
                         if note.id != notes.last?.id { Divider().overlay(Brand.line).padding(.leading, 36) }
                     }
                 }
@@ -354,6 +401,8 @@ struct NotesCollection: View {
         Button { store.togglePin(note.id) } label: {
             Label(note.pinned ? "Anulează fixarea" : "Fixează sus", systemImage: note.pinned ? "pin.slash" : "pin")
         }
+        StatusMenu(selected: note.status) { store.setStatus(note.id, $0) }
+        TagsMenu(noteID: note.id)
         ColorMenu(selected: note.colorHex) { store.setColor(note.id, $0) }
         Button { moving = note } label: { Label("Mută…", systemImage: "folder") }
         Button { store.duplicate(note.id) } label: { Label("Duplică", systemImage: "plus.square.on.square") }
@@ -387,7 +436,11 @@ struct NoteCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 5) {
-                Circle().fill(color).frame(width: 8, height: 8)
+                if let status = note.status {
+                    StatusPill(status: status)
+                } else {
+                    Circle().fill(color).frame(width: 8, height: 8)
+                }
                 if note.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Brand.accent) }
                 Spacer()
                 if let r = note.reminder, r > Date() {
@@ -412,7 +465,8 @@ struct NoteCard: View {
             }
             HStack(spacing: 6) {
                 Text(note.updated, format: .relative(presentation: .named))
-                ForEach(note.tags.prefix(2), id: \.self) { Text("#\($0)").foregroundStyle(color) }
+                Spacer(minLength: 0)
+                TagEmojis(note: note, limit: 3)
             }
             .font(.caption2)
             .foregroundStyle(Brand.muted)
@@ -436,10 +490,7 @@ struct NoteListRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(note.colorHex.map { Color(hexString: $0) } ?? Brand.muted)
-                .frame(width: 10, height: 10)
-                .padding(.top, 6)
+            StatusDot(note: note).padding(.top, 5)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     if note.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Brand.accent) }
@@ -454,7 +505,10 @@ struct NoteListRow: View {
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 4) {
-                Text(note.updated, format: .dateTime.day().month(.abbreviated))
+                HStack(spacing: 4) {
+                    TagEmojis(note: note, limit: 3)
+                    Text(note.updated, format: .dateTime.day().month(.abbreviated))
+                }
                     .font(.caption2).foregroundStyle(Brand.muted)
                 if let r = note.reminder, r > Date() {
                     Image(systemName: "bell.fill").font(.caption2).foregroundStyle(Brand.accent)
@@ -708,6 +762,417 @@ struct DiagnosticsView: View {
                 case .authorized, .provisional, .ephemeral: notifStatus = "acordată"
                 case .denied: notifStatus = "refuzată — activează din Setări"
                 default: notifStatus = "necerută"
+                }
+            }
+        }
+    }
+}
+
+
+// MARK: - Status
+
+/// Bulina din listă: culoarea statusului, altfel culoarea notei, altfel gri.
+struct StatusDot: View {
+    let note: NoteMeta
+    var size: CGFloat = 12
+
+    var body: some View {
+        let color = note.status?.color ?? note.colorHex.map { Color(hexString: $0) } ?? Brand.muted
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .shadow(color: note.status == nil ? .clear : color.opacity(0.6), radius: 4)
+    }
+}
+
+struct StatusPill: View {
+    let status: NoteStatus
+
+    var body: some View {
+        Label(status.label, systemImage: status.icon)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(status.color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(status.color.opacity(0.16)))
+    }
+}
+
+struct StatusMenu: View {
+    let selected: NoteStatus?
+    let onPick: (NoteStatus?) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(NoteStatus.allCases) { s in
+                Button { onPick(s) } label: {
+                    Label { Text(selected == s ? "\(s.label) ✓" : s.label) } icon: { Image(uiImage: StatusMenu.icon(s)) }
+                }
+            }
+            Button { onPick(nil) } label: {
+                Label("Fără status", systemImage: selected == nil ? "checkmark" : "circle.slash")
+            }
+        } label: { Label("Status", systemImage: "flag") }
+    }
+
+    static func icon(_ s: NoteStatus) -> UIImage {
+        (UIImage(systemName: s.icon) ?? UIImage())
+            .withTintColor(UIColor(hexString: s.hex), renderingMode: .alwaysOriginal)
+    }
+}
+
+/// Filtre rapide în folder: Toate · Problemă · În lucru · Gata.
+struct StatusFilterBar: View {
+    @EnvironmentObject var store: LibraryStore
+    let notes: [NoteMeta]
+    @Binding var selection: NoteStatus?
+    @Binding var tagSelection: UUID?
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                chip("Toate", count: notes.count, color: Brand.accent, active: selection == nil && tagSelection == nil) {
+                    selection = nil
+                    tagSelection = nil
+                }
+                ForEach(NoteStatus.allCases) { s in
+                    let count = notes.filter { $0.status == s }.count
+                    if count > 0 || selection == s {
+                        chip(s.label, count: count, color: s.color, active: selection == s) {
+                            selection = selection == s ? nil : s
+                        }
+                    }
+                }
+                ForEach(store.tagDefs) { t in
+                    let count = notes.filter { $0.tagIDs.contains(t.id) }.count
+                    if count > 0 || tagSelection == t.id {
+                        chip("\(t.emoji) \(t.name)", count: count, color: t.color, active: tagSelection == t.id) {
+                            tagSelection = tagSelection == t.id ? nil : t.id
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func chip(_ title: String, count: Int, color: Color, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 8, height: 8)
+                Text(title).font(.subheadline.weight(.semibold))
+                Text("\(count)").font(.caption).foregroundStyle(Brand.muted)
+            }
+            .foregroundStyle(Brand.text)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(active ? color.opacity(0.22) : Brand.surface))
+            .overlay(Capsule().stroke(active ? color.opacity(0.7) : Brand.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Ordinea manuală
+
+struct ReorderSheet: View {
+    @EnvironmentObject var store: LibraryStore
+    @Environment(\.dismiss) var dismiss
+    let folderID: UUID?
+    @State var items: [NoteMeta] = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(items) { note in
+                        HStack(spacing: 12) {
+                            StatusDot(note: note, size: 10)
+                            Text(note.displayTitle).foregroundStyle(Brand.text).lineLimit(1)
+                            Spacer()
+                            if note.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Brand.accent) }
+                        }
+                        .listRowBackground(Brand.surface)
+                    }
+                    .onMove { from, to in items.move(fromOffsets: from, toOffset: to) }
+                } footer: {
+                    Text("Trage de mânere ca să schimbi ordinea. Notele fixate rămân sus.")
+                        .foregroundStyle(Brand.muted)
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .scrollContentBackground(.hidden)
+            .background(Brand.background)
+            .navigationTitle("Aranjează ordinea")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Anulează") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Salvează") {
+                        store.setManualOrder(items.map(\.id), for: folderID)
+                        dismiss()
+                    }
+                    .bold()
+                }
+                ToolbarItem(placement: .bottomBar) {
+                    Menu {
+                        Button("După titlu (1, 2, 3…)") {
+                            items.sort { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
+                        }
+                        Button("După data creării") { items.sort { $0.created < $1.created } }
+                        Button("După status") {
+                            items.sort { ($0.status?.rank ?? 2) < ($1.status?.rank ?? 2) }
+                        }
+                    } label: { Label("Pornește de la…", systemImage: "wand.and.stars") }
+                }
+            }
+            .onAppear {
+                if items.isEmpty {
+                    let current = store.notes(in: folderID)
+                    items = store.sortMode(for: folderID) == .manual
+                        ? current
+                        : current.sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
+                }
+            }
+        }
+    }
+}
+
+
+// MARK: - Drag & drop între note
+
+/// Ții apăsat pe o notă și o tragi peste alta ca să schimbi ordinea.
+struct NoteDrag: ViewModifier {
+    let note: NoteMeta
+    let enabled: Bool
+    let cornerRadius: CGFloat
+    @Binding var target: UUID?
+    let onDrop: (UUID) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .draggable(note.id.uuidString) {
+                    Label(note.displayTitle, systemImage: "line.3.horizontal")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Brand.text)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(Brand.surfaceHi))
+                }
+                .dropDestination(for: String.self) { items, _ in
+                    defer { target = nil }
+                    guard let raw = items.first, let id = UUID(uuidString: raw), id != note.id else { return false }
+                    onDrop(id)
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    return true
+                } isTargeted: { hovering in
+                    if hovering { target = note.id } else if target == note.id { target = nil }
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(Brand.accent, lineWidth: target == note.id ? 2 : 0)
+                        .allowsHitTesting(false)
+                )
+                .animation(.easeOut(duration: 0.15), value: target)
+        } else {
+            content
+        }
+    }
+}
+
+
+// MARK: - Etichete
+
+/// Emoji-urile etichetelor unei note (pe card și în listă).
+struct TagEmojis: View {
+    @EnvironmentObject var store: LibraryStore
+    let note: NoteMeta
+    var limit = 3
+
+    var body: some View {
+        let tags = store.tags(of: note)
+        if !tags.isEmpty {
+            HStack(spacing: 2) {
+                ForEach(tags.prefix(limit)) { Text($0.emoji).font(.caption2) }
+                if tags.count > limit {
+                    Text("+\(tags.count - limit)").font(.caption2).foregroundStyle(Brand.muted)
+                }
+            }
+        }
+    }
+}
+
+/// Etichetele ca pastile cu nume (în editor).
+struct TagChips: View {
+    @EnvironmentObject var store: LibraryStore
+    let note: NoteMeta
+
+    var body: some View {
+        let tags = store.tags(of: note)
+        if !tags.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(tags) { t in
+                        Text("\(t.emoji) \(t.name)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(t.color)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(t.color.opacity(0.16)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Meniu cu bife: adaugă sau scoate etichete de pe o notă.
+struct TagsMenu: View {
+    @EnvironmentObject var store: LibraryStore
+    let noteID: UUID
+
+    var body: some View {
+        let current = store.note(noteID)?.tagIDs ?? []
+        Menu {
+            ForEach(store.tagDefs) { t in
+                Button { store.toggleTag(t.id, on: noteID) } label: {
+                    if current.contains(t.id) {
+                        Label("\(t.emoji) \(t.name)", systemImage: "checkmark")
+                    } else {
+                        Text("\(t.emoji) \(t.name)")
+                    }
+                }
+            }
+        } label: { Label("Etichete", systemImage: "tag") }
+    }
+}
+
+/// Lista etichetelor: adaugă, redenumește, schimbă emoji/culoare, ordonează, șterge.
+struct TagManagerSheet: View {
+    @EnvironmentObject var store: LibraryStore
+    @Environment(\.dismiss) var dismiss
+    @State var editing: TagDef?
+    @State var deleting: TagDef?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(store.tagDefs) { t in
+                        Button { editing = t } label: {
+                            HStack(spacing: 12) {
+                                Text(t.emoji).frame(width: 26)
+                                Text(t.name).foregroundStyle(Brand.text)
+                                Spacer()
+                                Circle().fill(t.color).frame(width: 12, height: 12)
+                                Text("\(store.tagCount(t.id))").font(.caption).foregroundStyle(Brand.muted)
+                            }
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) { deleting = t } label: { Label("Șterge", systemImage: "trash") }
+                        }
+                    }
+                    .onMove { store.moveTags(from: $0, to: $1) }
+                } footer: {
+                    Text("Atinge o etichetă ca s-o modifici. Glisează spre stânga ca s-o ștergi; notele nu se pierd.")
+                        .foregroundStyle(Brand.muted)
+                }
+                .listRowBackground(Brand.surface)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Brand.background)
+            .navigationTitle("Etichete")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { EditButton() }
+                ToolbarItem(placement: .confirmationAction) { Button("Gata") { dismiss() }.bold() }
+                ToolbarItem(placement: .bottomBar) {
+                    Button { editing = TagDef(name: "", emoji: "🏷️", colorHex: "59E0EF") } label: {
+                        Label("Etichetă nouă", systemImage: "plus.circle.fill")
+                    }
+                }
+            }
+            .sheet(item: $editing) { TagEditorSheet(tag: $0) }
+            .confirmationDialog("Ștergi eticheta „\(deleting?.name ?? "")”?",
+                                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                                titleVisibility: .visible) {
+                Button("Șterge eticheta", role: .destructive) {
+                    if let t = deleting { store.deleteTag(t.id) }
+                    deleting = nil
+                }
+            } message: { Text("Eticheta dispare de pe toate notele. Notele rămân.") }
+        }
+    }
+}
+
+struct TagEditorSheet: View {
+    @EnvironmentObject var store: LibraryStore
+    @Environment(\.dismiss) var dismiss
+    @State var tag: TagDef
+
+    static let emojis = ["🔥", "💡", "💬", "💪", "💀", "⏳", "🚀", "🐛", "💰", "📞", "📌", "⭐️",
+                         "✅", "❗️", "🔒", "🎨", "🧪", "📦", "🧾", "👀", "🤝", "🏷️", "⚡️", "🧠"]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 12) {
+                        Text(tag.emoji).font(.title)
+                        TextField("Nume etichetă", text: $tag.name).font(.title3.weight(.semibold))
+                    }
+                }
+                .listRowBackground(Brand.surface)
+
+                Section("Emoji") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 10) {
+                        ForEach(Self.emojis, id: \.self) { e in
+                            Text(e)
+                                .font(.title2)
+                                .frame(width: 42, height: 42)
+                                .background(RoundedRectangle(cornerRadius: 10)
+                                    .fill(tag.emoji == e ? tag.color.opacity(0.3) : Brand.surfaceHi))
+                                .onTapGesture { tag.emoji = e }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    TextField("Sau scrie alt emoji", text: Binding(
+                        get: { "" },
+                        set: { if let c = $0.last { tag.emoji = String(c) } }
+                    ))
+                }
+                .listRowBackground(Brand.surface)
+
+                Section("Culoare") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                        ForEach(Brand.palette, id: \.hex) { item in
+                            Circle()
+                                .fill(Color(hexString: item.hex))
+                                .frame(width: 34, height: 34)
+                                .overlay(Circle().stroke(Brand.text, lineWidth: tag.colorHex == item.hex ? 3 : 0).padding(-4))
+                                .onTapGesture { tag.colorHex = item.hex }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .listRowBackground(Brand.surface)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Brand.background)
+            .navigationTitle(store.tag(tag.id) == nil ? "Etichetă nouă" : "Editează eticheta")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Anulează") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Salvează") {
+                        var t = tag
+                        t.name = t.name.trimmingCharacters(in: .whitespaces)
+                        if t.name.isEmpty { t.name = "Etichetă" }
+                        store.saveTag(t)
+                        dismiss()
+                    }
+                    .bold()
                 }
             }
         }
