@@ -1,0 +1,7 @@
+build/
+Payload/
+*.ipa
+GuwapiNotes.xcodeproj/
+App/Info.plist
+Widget/Info.plist
+.DS_Store
