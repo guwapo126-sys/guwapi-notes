@@ -127,3 +127,12 @@ Culoarea de accent se schimbă din `Shared/Shared.swift` → `Brand.accent`.
 - Claude scrie propuneri în repo (`## Propuneri`): actualizare cu dovadă, bifă, pas nou, notă nouă. Pe telefon: ✨ „Claude propune” → Acceptă / Respinge (și glisare).
 - Fără dovadă, Claude nu propune (regula din CLAUDE.md).
 - Accesibilitate: etichete VoiceOver, butoane de 44 pt, „Reducere mișcare” respectată în ecranul de propuneri.
+
+## Versiunea 0.9.1
+
+- Setări → Instalare: cât mai are până expiră semnătura de 7 zile (contul Apple gratuit), cu data exactă și bară de progres.
+- Notificări cu o zi și cu 3 ore înainte de expirare; avertisment pe ecranul principal în ultima zi, cu buton „Deschide SideStore”.
+
+## Versiunea 0.9.2
+
+- Setări → Statusuri → „Când pui Gata, etichetele”: Întreabă (implicit) / Șterge automat / Păstrează. Bară discretă jos cu „Șterge etichetele” sau „Anulează”.

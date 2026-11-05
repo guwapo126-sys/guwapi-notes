@@ -15,6 +15,7 @@ struct GuwapiNotesApp: App {
         WindowGroup {
             ZStack {
                 RootView()
+                DoneNoticeBar()
                 if showSplash {
                     SplashView().transition(.opacity).zIndex(1)
                 }
@@ -28,11 +29,15 @@ struct GuwapiNotesApp: App {
             .task {
                 sync.attach(store)
                 sync.syncIfStale()
+                Reminders.scheduleExpiryWarnings()
                 try? await Task.sleep(nanoseconds: 650_000_000)
                 withAnimation(.easeOut(duration: 0.35)) { showSplash = false }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { sync.syncIfStale() }
+                if phase == .active {
+                    sync.syncIfStale()
+                    Reminders.scheduleExpiryWarnings()
+                }
             }
         }
     }

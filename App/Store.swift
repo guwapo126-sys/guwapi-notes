@@ -190,13 +190,77 @@ final class LibraryStore: ObservableObject {
         if sortMode(for: dragged.folderID) == .status, dragged.status != goal.status,
            let i = notes.firstIndex(where: { $0.id == id }) {
             notes[i].status = goal.status
+            if goal.status == .done {
+                var n = notes[i]
+                handleDone(&n)
+                notes[i] = n
+            }
         }
         setManualOrder(order, for: dragged.folderID)
     }
 
     func setStatus(_ id: UUID, _ status: NoteStatus?) {
         guard var n = note(id) else { return }
+        let wasDone = n.status == .done
         n.status = status
+        if status == .done && !wasDone { handleDone(&n) }
+        update(n)
+    }
+
+    // MARK: „Gata” și etichetele
+
+    /// Bara de jos după ce o notă trece pe Gata: oferă ștergerea etichetelor sau anularea ei.
+    struct DoneNotice: Identifiable, Equatable {
+        enum Kind { case offerClear, cleared }
+        let id = UUID()
+        let noteID: UUID
+        let tagIDs: [UUID]
+        let kind: Kind
+    }
+
+    @Published var doneNotice: DoneNotice?
+
+    /// Ce face aplicația cu etichetele când o notă devine Gata (setat din Setări).
+    enum DoneTagMode: String, CaseIterable, Identifiable {
+        case ask, clear, keep
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .ask: return "Întreabă"
+            case .clear: return "Șterge automat"
+            case .keep: return "Păstrează"
+            }
+        }
+    }
+
+    static let doneTagModeKey = "done.tagMode"
+
+    static var doneTagMode: DoneTagMode {
+        DoneTagMode(rawValue: UserDefaults.standard.string(forKey: doneTagModeKey) ?? "") ?? .ask
+    }
+
+    private func handleDone(_ n: inout NoteMeta) {
+        guard !n.tagIDs.isEmpty else { return }
+        switch Self.doneTagMode {
+        case .keep:
+            return
+        case .ask:
+            doneNotice = DoneNotice(noteID: n.id, tagIDs: n.tagIDs, kind: .offerClear)
+        case .clear:
+            doneNotice = DoneNotice(noteID: n.id, tagIDs: n.tagIDs, kind: .cleared)
+            n.tagIDs = []
+        }
+    }
+
+    func clearTags(_ id: UUID) {
+        guard var n = note(id) else { return }
+        n.tagIDs = []
+        update(n)
+    }
+
+    func restoreTags(_ id: UUID, _ tagIDs: [UUID]) {
+        guard var n = note(id) else { return }
+        n.tagIDs = tagIDs
         update(n)
     }
 
@@ -746,6 +810,29 @@ enum Reminders {
 
     static func cancel(_ id: UUID) {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id.uuidString])
+    }
+
+    /// Notificări înainte să expire instalarea: cu o zi și cu 3 ore înainte. Se reprogramează la fiecare pornire.
+    static func scheduleExpiryWarnings() {
+        let center = UNUserNotificationCenter.current()
+        let ids = ["guwapi.expiry.24h", "guwapi.expiry.3h"]
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        guard let expiry = InstallExpiry.date else { return }
+        let plan: [(String, TimeInterval, String)] = [
+            (ids[0], 24 * 3600, "Aplicația expiră mâine"),
+            (ids[1], 3 * 3600, "Aplicația expiră în 3 ore")
+        ]
+        for (id, before, title) in plan {
+            let fire = expiry.addingTimeInterval(-before)
+            guard fire > Date() else { continue }
+            let c = UNMutableNotificationContent()
+            c.title = title
+            c.body = "Deschide SideStore → My Apps → Refresh All. Notițele rămân neschimbate."
+            c.sound = .default
+            let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            center.add(UNNotificationRequest(identifier: id, content: c, trigger: trigger))
+        }
     }
 
     static func test() {

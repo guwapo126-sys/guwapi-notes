@@ -40,6 +40,12 @@ struct RootView: View {
     }
 
     @ViewBuilder private var libraryContent: some View {
+        if let level = InstallExpiry.level(), level == .urgent || level == .expired {
+            Section {
+                ExpiryWarningRow()
+            }
+            .listRowBackground(NoteStatus.problem.color.opacity(0.14))
+        }
         if !store.proposals.isEmpty {
             Section {
                 NavigationLink(value: Route.proposals) { ProposalsEntryRow(count: store.proposals.count) }
@@ -1757,6 +1763,8 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                InstallExpirySection()
+                DoneSettingsSection()
                 SyncSettingsSection()
                 Section {
                     appearancePicker
@@ -1809,5 +1817,214 @@ struct SettingsView: View {
         case .light: return "Mereu luminos, indiferent de setarea iPhone-ului."
         case .dark: return "Mereu întunecat, indiferent de setarea iPhone-ului."
         }
+    }
+}
+
+
+// MARK: - Expirarea instalării
+
+private extension InstallExpiry.Level {
+    var color: Color {
+        switch self {
+        case .ok: return NoteStatus.done.color
+        case .soon: return NoteStatus.progress.color
+        case .urgent, .expired: return NoteStatus.problem.color
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .ok: return "checkmark.seal.fill"
+        case .soon: return "clock.badge.exclamationmark"
+        case .urgent, .expired: return "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+/// Setări → Instalare: cât mai are până expiră semnătura de 7 zile.
+struct InstallExpirySection: View {
+    var body: some View {
+        Section {
+            if InstallExpiry.date == nil {
+                Text("Nu găsesc profilul de instalare (aplicația nu e instalată prin SideStore / iloader).")
+                    .font(.subheadline)
+                    .foregroundStyle(Brand.muted)
+            } else {
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    ExpiryCountdown(now: context.date)
+                }
+            }
+        } header: {
+            sectionHeader("Instalare")
+        } footer: {
+            Text("Contul Apple gratuit semnează aplicația pentru 7 zile. Reîmprospătează din SideStore → My Apps → Refresh All. Primești notificare cu o zi și cu 3 ore înainte. Notițele nu se pierd.")
+                .foregroundStyle(Brand.muted)
+        }
+        .listRowBackground(Brand.surface)
+    }
+}
+
+struct ExpiryCountdown: View {
+    let now: Date
+
+    private var level: InstallExpiry.Level { InstallExpiry.level(at: now) ?? .ok }
+
+    private var dateText: String {
+        guard let date = InstallExpiry.date else { return "" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ro_RO")
+        f.dateFormat = "EEEE, d MMM, HH:mm"
+        return (level == .expired ? "A expirat " : "Expiră ") + f.string(from: date)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: level.icon)
+                    .font(.title3)
+                    .foregroundStyle(level.color)
+                Text(InstallExpiry.remainingText(at: now) ?? "")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Brand.text)
+                    .monospacedDigit()
+                Text(level == .expired ? "" : "rămase")
+                    .font(.subheadline)
+                    .foregroundStyle(Brand.muted)
+                Spacer()
+            }
+            ProgressView(value: InstallExpiry.elapsedFraction(at: now))
+                .tint(level.color)
+                .accessibilityHidden(true)
+            Text(dateText)
+                .font(.subheadline)
+                .foregroundStyle(Brand.text.opacity(0.85))
+            if let url = URL(string: "sidestore://"), level != .ok {
+                Link(destination: url) {
+                    Label("Deschide SideStore", systemImage: "arrow.clockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(level.color)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Avertismentul de pe ecranul principal, în ultima zi.
+struct ExpiryWarningRow: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(NoteStatus.problem.color)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(InstallExpiry.level(at: context.date) == .expired
+                         ? "Instalarea a expirat"
+                         : "Aplicația expiră în \(InstallExpiry.remainingText(at: context.date) ?? "")")
+                        .font(.headline)
+                        .foregroundStyle(Brand.text)
+                    Text("SideStore → My Apps → Refresh All")
+                        .font(.subheadline)
+                        .foregroundStyle(Brand.muted)
+                }
+                Spacer()
+                if let url = URL(string: "sidestore://") {
+                    Link(destination: url) {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                            .font(.title2)
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel("Deschide SideStore")
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+
+// MARK: - Gata → etichete
+
+struct DoneSettingsSection: View {
+    @AppStorage(LibraryStore.doneTagModeKey) var mode = LibraryStore.DoneTagMode.ask.rawValue
+
+    var body: some View {
+        Section {
+            Picker("Când pui Gata, etichetele", selection: $mode) {
+                ForEach(LibraryStore.DoneTagMode.allCases) { m in
+                    Text(m.label).tag(m.rawValue)
+                }
+            }
+        } header: {
+            sectionHeader("Statusuri")
+        } footer: {
+            Text("„Întreabă” îți arată jos un buton „Șterge etichetele”; „Șterge automat” le scoate singur, cu Anulează.")
+                .foregroundStyle(Brand.muted)
+        }
+        .listRowBackground(Brand.surface)
+    }
+}
+
+/// Bara discretă de jos după ce o notă trece pe Gata.
+struct DoneNoticeBar: View {
+    @EnvironmentObject var store: LibraryStore
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+
+    var body: some View {
+        VStack {
+            Spacer()
+            if let notice = store.doneNotice {
+                bar(notice)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                    .task(id: notice.id) {
+                        try? await Task.sleep(nanoseconds: 6_000_000_000)
+                        if store.doneNotice?.id == notice.id { hide() }
+                    }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .animation(reduceMotion ? nil : .spring(duration: 0.3), value: store.doneNotice)
+    }
+
+    private func bar(_ notice: LibraryStore.DoneNotice) -> some View {
+        let emojis = notice.tagIDs.compactMap { store.tag($0)?.emoji }.joined()
+        let count = notice.tagIDs.count
+        let message = notice.kind == .cleared
+            ? "Gata · etichete șterse \(emojis)"
+            : "Gata · \(count == 1 ? "1 etichetă rămasă" : "\(count) etichete rămase") \(emojis)"
+        return HStack(spacing: 12) {
+            Image(systemName: NoteStatus.done.icon).foregroundStyle(NoteStatus.done.color)
+            Text(message)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Brand.text)
+                .lineLimit(2)
+            Spacer(minLength: 4)
+            Button(notice.kind == .cleared ? "Anulează" : "Șterge etichetele") {
+                if notice.kind == .cleared {
+                    store.restoreTags(notice.noteID, notice.tagIDs)
+                } else {
+                    store.clearTags(notice.noteID)
+                }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                hide()
+            }
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(Brand.accent)
+            .frame(minHeight: 44)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Brand.surfaceHi))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Brand.line, lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func hide() {
+        store.doneNotice = nil
     }
 }

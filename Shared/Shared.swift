@@ -437,14 +437,19 @@ enum AppGroup {
         return ids.filter { seen.insert($0).inserted }
     }
 
-    static func profileGroups() -> [String] {
+    /// Profilul de instalare pus de SideStore / iloader în aplicație (plist-ul din interiorul semnăturii).
+    static func provisioningProfile() -> [String: Any]? {
         guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
               let data = try? Data(contentsOf: url),
               let start = data.range(of: Data("<?xml".utf8)),
               let end = data.range(of: Data("</plist>".utf8), in: start.lowerBound..<data.endIndex)
-        else { return [] }
+        else { return nil }
         let xml = Data(data[start.lowerBound..<end.upperBound])
-        guard let plist = (try? PropertyListSerialization.propertyList(from: xml, format: nil)) as? [String: Any],
+        return (try? PropertyListSerialization.propertyList(from: xml, format: nil)) as? [String: Any]
+    }
+
+    static func profileGroups() -> [String] {
+        guard let plist = provisioningProfile(),
               let ent = plist["Entitlements"] as? [String: Any],
               let groups = ent["com.apple.security.application-groups"] as? [String]
         else { return [] }
@@ -571,5 +576,49 @@ enum WidgetLink {
         case .waiting: return "hourglass"
         case .broken: return "xmark.octagon.fill"
         }
+    }
+}
+
+
+// MARK: - Expirarea instalării (contul Apple gratuit: 7 zile)
+
+enum InstallExpiry {
+    /// Data la care expiră semnătura aplicației; nil dacă nu există profil (ex. build de test).
+    /// Profilul se schimbă doar la reinstalare / Refresh (aplicația repornește), deci îl citim o dată.
+    private static let profile: [String: Any]? = AppGroup.provisioningProfile()
+    static var date: Date? { profile?["ExpirationDate"] as? Date }
+    static var created: Date? { profile?["CreationDate"] as? Date }
+
+    enum Level { case ok, soon, urgent, expired }
+
+    static func level(at now: Date = Date()) -> Level? {
+        guard let date else { return nil }
+        let left = date.timeIntervalSince(now)
+        if left <= 0 { return .expired }
+        if left < 24 * 3600 { return .urgent }
+        if left < 2 * 24 * 3600 { return .soon }
+        return .ok
+    }
+
+    /// „3 z 4 h”, „5 h 20 min”, „12 min”
+    static func remainingText(at now: Date = Date()) -> String? {
+        guard let date else { return nil }
+        let left = Int(date.timeIntervalSince(now))
+        if left <= 0 { return "Expirat" }
+        let days = left / 86_400
+        let hours = (left % 86_400) / 3600
+        let minutes = (left % 3600) / 60
+        if days > 0 { return "\(days) z \(hours) h" }
+        if hours > 0 { return "\(hours) h \(minutes) min" }
+        return "\(max(minutes, 1)) min"
+    }
+
+    /// Cât din perioadă a trecut (0…1), pentru bara de progres.
+    static func elapsedFraction(at now: Date = Date()) -> Double {
+        guard let date else { return 0 }
+        let start = created ?? date.addingTimeInterval(-7 * 86_400)
+        let total = date.timeIntervalSince(start)
+        guard total > 0 else { return 1 }
+        return min(1, max(0, now.timeIntervalSince(start) / total))
     }
 }
